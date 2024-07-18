@@ -6,8 +6,9 @@ This repo offers scripts for converting a 3D Gaussian Splatting scene into a den
 
 <p >
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="338" />
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExMm9tcjl2c2NnanZueWtnNXc2aXAweG1tMGlia2NtM2FpeGczcnNmdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/v1kltPglEL19029SCt/giphy-downsized-large.gif" width="338" />
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdsM3k2Z3JlZ296eDZpOWlwNHc0cjZpZHA1djdoeDU3c3h0a2ZveSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z9Cd1ENioEBGHxXcbs/giphy-downsized-large.gif" width="338" /> 
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcndwdG9yaGNydmg2cW1ybTQwb2Nnb2luOGswcml2bGc4NGNqY3FwaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9M8l0Vv7YJnTFC8evQ/giphy-downsized-large.gif" width="338" />
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjdhc21tNnJ6OTVibDlqOHB6MzR0dDZ3bmRyczNqN2lpNDM3a2JtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1C4h9ZvYNryH5Zu1oZ/giphy-downsized-large.gif" width="338" /> 
 </p>
 
 Credit to the following repositories, which were used as part of this codebase:
@@ -46,7 +47,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | transform_path       |    -          |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
 | num_points           |    10000000   |  Total number of points to generate for the pointcloud |
 | skip_render_colours  |    False      |  Skip rendering colours- faster but colours will be strange |
-| colour_quality       |    medium     |  The quality of the colours when generating the point cloud (more quality = slower processing time) |
+| colour_quality       |    medium     |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: low, medium, high and ultra |
 | bounding_box_min     |    -          |  Values for minimum position of gaussians to include in generating the new point cloud  |
 | bounding_box_max     |    -          |  Values for maximum position of gaussians to include in generating the new point cloud  |
 | std_distance         |    2.0        |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
