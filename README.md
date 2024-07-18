@@ -13,8 +13,8 @@ This repo offers scripts for converting a 3D Gaussian Splatting scene into a den
 
 Credit to the following repositories, which were used as part of this codebase:
 
-    1. [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting)
-    2. [Torch Splatting](https://github.com/hbb1/torch-splatting/tree/main)
+    1. 3D Gaussian Splatting- https://github.com/graphdeco-inria/gaussian-splatting
+    2. Torch Splatting- https://github.com/hbb1/torch-splatting/tree/main
 
 ## How to run
 
