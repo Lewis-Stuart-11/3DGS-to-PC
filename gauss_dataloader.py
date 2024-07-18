@@ -4,8 +4,10 @@ import torch
 
 from plyfile import PlyData, PlyElement
 
-def load_splat_data():
-    pass
+def computeColorFromLowDegSH(sh):
+    SH_C0 = 0.28209479177387814
+    
+    return ((SH_C0 * sh[:,:,0].to(torch.double)) + 0.5).clip(0, 1).type(torch.double) 
 
 def load_ply_data(path, max_sh_degree=3):
     plydata = PlyData.read(path)
@@ -42,44 +44,102 @@ def load_ply_data(path, max_sh_degree=3):
     for idx, attr_name in enumerate(rot_names):
         rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
-    active_sh_degree = max_sh_degree
-
     features_all = torch.cat((torch.tensor(features_dc, device="cuda:0"), torch.tensor(features_extra, device="cuda:0")), 2)
+
+    colours = computeColorFromLowDegSH(features_all)
 
     opacities = (1 / (1 + torch.exp(torch.tensor(-opacities, device="cuda:0")))).type(torch.float).squeeze(1) # torch.full(opacities.shape, 0.05, device="cuda:0")-
 
     xyz_tensor = torch.tensor(xyz, device="cuda:0")
     scales_tensor = torch.tensor(scales, device="cuda:0")
-    rots_tensor = torch.tensor(rots, device="cuda:0")
+    rots_tensor = torch.tensor(rots/np.expand_dims(np.linalg.norm(rots, axis=1), 1), device="cuda:0") 
 
-    return xyz_tensor, scales_tensor, rots_tensor, features_all, opacities
+    return xyz_tensor, scales_tensor, rots_tensor, colours, opacities
+
+def load_splat_data(path):
+    with open(path, "rb") as test_file:
+        file_content = test_file.read()
     
+    dtype = np.dtype([
+        ('xyz', np.float32, 3), 
+        ('scales', np.float32, 3),  
+        ('colour', np.uint8, 4),  
+        ('rots', np.uint8, 4)
+    ])
     
-def save_xyz_to_ply(xyz_points, filename, rgb_colors=None):
+    num_structures = len(file_content) // dtype.itemsize
+    
+    data_array = np.frombuffer(file_content, dtype=dtype, count=num_structures)
+
+    xyz = data_array['xyz']
+    scales = data_array['scales']
+    colours = data_array['colour']
+    rots = data_array['rots']
+    
+    xyz_tensor = torch.tensor(xyz, device="cuda:0")
+    scales_tensor = torch.tensor(np.log(scales), device="cuda:0")
+    colours_tensor = torch.tensor(colours[:, :3] / 255, device="cuda:0")
+    opacities = torch.tensor(colours[:, 3] / 255, device="cuda:0")
+    
+    rots_tensor = torch.tensor((rots.astype(np.float32) - 128) / 128, device="cuda:0")
+    
+    return xyz_tensor, scales_tensor, rots_tensor, colours_tensor, opacities
+
+    
+def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, chunk_size=10**6):
     """
     Save a series of XYZ points to a PLY file.
 
     Parameters:
     xyz_points (numpy.ndarray): An array of shape (N, 3) containing XYZ coordinates.
     filename (str): The name of the output PLY file.
+    rgb_colors (numpy.ndarray, optional): An array of shape (N, 3) containing RGB colors. Defaults to white.
     """
+
     # Ensure the points are in the correct format
     assert xyz_points.shape[1] == 3, "Input points should be in the format (N, 3)"
 
     if rgb_colors is None:
-        rgb_colors = np.repeat(np.array([[255, 255, 255]]), len(xyz_points), axis=0)
+        rgb_colors = tensor.full((xyz_points.shape[0], 3), 255, dtype=torch.int)
 
-    xyz_and_colours = np.hstack((xyz_points, rgb_colors))
+    total_points = xyz_points.shape[0]
 
-    # Create a structured array
-    vertex = np.array([tuple(point) for point in xyz_and_colours], 
-                      dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-    
-    # Create a PlyElement
-    ply_element = PlyElement.describe(vertex, 'vertex')
-    
-    # Write the ply file
-    PlyData([ply_element]).write(filename)
+    num_chunks = (total_points + chunk_size - 1) // chunk_size
+
+    with open(filename, 'wb') as ply_file:
+        # Write PLY header
+        header = f"""ply
+format binary_little_endian 1.0
+element vertex {total_points}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header
+"""
+        ply_file.write(header.encode('utf-8'))
+
+        for i in range(num_chunks):
+            start_idx = i * chunk_size
+            end_idx = min(start_idx + chunk_size, total_points)
+
+            points_chunk = xyz_points[start_idx:end_idx].cpu().detach().numpy()
+            colors_chunk = rgb_colors[start_idx:end_idx].cpu().detach().numpy().astype(np.uint8)
+
+            # Create a structured array directly
+            vertex = np.zeros(points_chunk.shape[0], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
+                                                        ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+
+            vertex['x'] = points_chunk[:, 0]
+            vertex['y'] = points_chunk[:, 1]
+            vertex['z'] = points_chunk[:, 2]
+            vertex['red'] = colors_chunk[:, 0]
+            vertex['green'] = colors_chunk[:, 1]
+            vertex['blue'] = colors_chunk[:, 2]
+
+            ply_file.write(vertex.tobytes())
 
 
 def load_gaussians(input_path):
