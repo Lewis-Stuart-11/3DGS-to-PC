@@ -229,7 +229,7 @@ class GaussRenderer():
 
         recommended_gaussians_per_tile = 300**2
 
-        TILE_SIZE =  max(min(int(recommended_gaussians_per_tile/avg_gaussians_per_pixel),40), 5) 
+        TILE_SIZE =  max(min(int(recommended_gaussians_per_tile/avg_gaussians_per_pixel),30), 5) 
 
         for w in range(0, camera.image_width, TILE_SIZE):
             for h in range(0, camera.image_height, TILE_SIZE):

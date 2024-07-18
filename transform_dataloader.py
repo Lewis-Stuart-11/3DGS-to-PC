@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import cv2
 import struct
+import json
 
 def convert_sfm_pose_to_nerf(transform):
     c2w = np.linalg.inv(transform)
@@ -172,7 +173,7 @@ def load_colmap_txt_data(input_path):
 
     return colmap_transforms, transform_cameras
 
-def get_transform_intrinsics(transfrom_data, fname):
+def get_transform_intrinsics(transforms, fname):
     intrinsics = [0, 0, 0, 0]
 
     intrinsics[2] = transforms["fl_x"]
@@ -210,9 +211,11 @@ def load_transform_json_data(input_path):
         transform = frame["transform_matrix"]
 
         if all_intrinsics is None:
-            intrinsics[fname] = get_transform_intrinsics(transforms, transforms["frames"][0]["file_path"])
+            intrinsics[fname] = get_transform_intrinsics(frame, frame["file_path"])
         else:
             intrinsics[fname] = all_intrinsics
+
+        json_transforms[fname] = transform 
 
     return json_transforms, intrinsics
 
@@ -230,6 +233,3 @@ def load_transform_data(input_path):
             return load_transform_json_data(input_path)
         else:
             raise AttributeError("Unsupported transform data type")
-
-
-
