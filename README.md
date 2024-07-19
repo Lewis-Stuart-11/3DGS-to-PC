@@ -1,14 +1,14 @@
 # 3D Gaussian Splatting to Dense Point Cloud
 
-Gaussian Splatting can generate extremely high quality 3D representations of a scene. However, to properly view this reconstruction, specialised gaussian renders are required. Furthermore, a lot of 3D handling software is not compatible with 3D gaussians... but most are compatible with point clouds. 
+Gaussian Splatting can generate extremely high quality 3D representations of a scene. However, to properly view this reconstruction, specialised gaussian renders are required. Furthermore, a lot of 3D handling software are not compatible with 3D gaussians... but most are compatible with point clouds. 
 
 This repo offers scripts for converting a 3D Gaussian Splatting scene into a dense point cloud. The generated point clouds are high-quality and effectively imitate the original 3DGS scenes. Extra functionality is offered to customise the creation of the point cloud.
 
 <p >
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="338" />
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdsM3k2Z3JlZ296eDZpOWlwNHc0cjZpZHA1djdoeDU3c3h0a2ZveSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z9Cd1ENioEBGHxXcbs/giphy-downsized-large.gif" width="338" /> 
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcndwdG9yaGNydmg2cW1ybTQwb2Nnb2luOGswcml2bGc4NGNqY3FwaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9M8l0Vv7YJnTFC8evQ/giphy-downsized-large.gif" width="338" />
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjdhc21tNnJ6OTVibDlqOHB6MzR0dDZ3bmRyczNqN2lpNDM3a2JtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1C4h9ZvYNryH5Zu1oZ/giphy-downsized-large.gif" width="338" /> 
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="350" />
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdsM3k2Z3JlZ296eDZpOWlwNHc0cjZpZHA1djdoeDU3c3h0a2ZveSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z9Cd1ENioEBGHxXcbs/giphy-downsized-large.gif" width="350" /> 
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcndwdG9yaGNydmg2cW1ybTQwb2Nnb2luOGswcml2bGc4NGNqY3FwaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9M8l0Vv7YJnTFC8evQ/giphy-downsized-large.gif" width="350" />
+  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjdhc21tNnJ6OTVibDlqOHB6MzR0dDZ3bmRyczNqN2lpNDM3a2JtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1C4h9ZvYNryH5Zu1oZ/giphy-downsized-large.gif" width="350" /> 
 </p>
 
 Credit to the following repositories, which were used as part of this codebase:
@@ -40,19 +40,19 @@ The transform path can either be to a transforms.json file or COLMAP output file
 
 ## Functionality 
 
-| Argument             | Default Value | Description |
-| :---                 |    :----:     |          ---: |
-| input_path           |    -          |  Path to ply or splat file to convert to a point cloud |
-| output_path          |    3dgs.py    |  Path to output file (must be ply file) |
-| transform_path       |    -          |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
-| num_points           |    10000000   |  Total number of points to generate for the pointcloud |
-| skip_render_colours  |    False      |  Skip rendering colours- faster but colours will be strange |
-| colour_quality       |    medium     |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: low, medium, high and ultra |
-| bounding_box_min     |    -          |  Values for minimum position of gaussians to include in generating the new point cloud  |
-| bounding_box_max     |    -          |  Values for maximum position of gaussians to include in generating the new point cloud  |
-| std_distance         |    2.0        |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
-| min_opacity          |    0.0        |  Minimum opacity for gaussians that will be included (must be between 0-1) |
-| cull_gaussian_sizes  |    0.0        |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
+| Argument             | Default Value  | Description |
+| :---                 |    :----:      |          ---: |
+| input_path           |    -           |  Path to ply or splat file to convert to a point cloud |
+| output_path          |    3dgs_pc.ply |  Path to output file (must be ply file) |
+| transform_path       |    -           |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
+| num_points           |    10000000    |  Total number of points to generate for the pointcloud |
+| skip_render_colours  |    False       |  Skip rendering colours- faster but colours will be strange |
+| colour_quality       |    medium      |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: low, medium, high and ultra |
+| bounding_box_min     |    -           |  Values for minimum position of gaussians to include in generating the new point cloud  |
+| bounding_box_max     |    -           |  Values for maximum position of gaussians to include in generating the new point cloud  |
+| std_distance         |    2.0         |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
+| min_opacity          |    0.0         |  Minimum opacity for gaussians that will be included (must be between 0-1) |
+| cull_gaussian_sizes  |    0.0         |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
 
 ## How this works
 

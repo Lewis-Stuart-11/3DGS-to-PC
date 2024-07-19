@@ -6,6 +6,10 @@ import struct
 import json
 
 def convert_sfm_pose_to_nerf(transform):
+    """
+    Convert camera pose from COLMAP to a transform for rendering
+    """
+
     c2w = np.linalg.inv(transform)
 
     flip_mat = np.array([
@@ -18,6 +22,9 @@ def convert_sfm_pose_to_nerf(transform):
     return np.matmul(c2w, flip_mat)
 
 def qvec2rotmat(qvec):
+    """
+    Converts a quartonian to a rotation matrix
+    """
     return np.array([
 		[
 			1 - 2 * qvec[2]**2 - 2 * qvec[3]**2,
@@ -35,11 +42,18 @@ def qvec2rotmat(qvec):
 	])
 
 def read_next_bytes(fid, num_bytes, format_char_sequence, endian_character="<"):
-    data = fid.read(num_bytes)
-    return struct.unpack(endian_character + format_char_sequence, data)
+    """ 
+    Reads in the next byte from a bin file 
+    """
+    return struct.unpack(endian_character + format_char_sequence, fid.read(num_bytes))
 
 def get_colmap_bin_intrinsics(file_path):
+    """
+    Calculates camera intrinsics from a COLMAP bin file
+    """
+
     camera_intrinsics = {}
+    
     with open(file_path, "rb") as colmap_file:
         num_cameras = read_next_bytes(colmap_file, 8, "Q")[0]
         for _ in range(num_cameras):
@@ -56,6 +70,9 @@ def get_colmap_bin_intrinsics(file_path):
     return camera_intrinsics
 
 def get_colmap_txt_intrinsics(file_path):
+    """
+    Calculates camera intrinsics from a COLMAP txt file
+    """
 
     camera_intrinsics = {}
 
@@ -77,6 +94,9 @@ def get_colmap_txt_intrinsics(file_path):
     return camera_intrinsics
 
 def get_colmap_img_transform(elems):
+    """
+    Calculates transforms for cameras from a COLMAP line
+    """
 
     bottom = np.array([0.0, 0.0, 0.0, 1.0]).reshape([1, 4])
 
@@ -95,6 +115,9 @@ def get_colmap_img_transform(elems):
     return c2w_flipped.tolist()
 
 def load_colmap_bin_data(input_path):
+    """
+    Load in transforms and camera intrinsics from a COLMAP directory of bin files
+    """
 
     colmap_transforms = {}
     transform_cameras = {}
@@ -140,6 +163,10 @@ def load_colmap_bin_data(input_path):
     return colmap_transforms, transform_cameras
 
 def load_colmap_txt_data(input_path):
+    """
+    Load in poses and camera intrinsics from a COLMAP directory of txt files
+    """
+
     colmap_transforms = {}
     transform_cameras = {}
 
@@ -174,6 +201,10 @@ def load_colmap_txt_data(input_path):
     return colmap_transforms, transform_cameras
 
 def get_transform_intrinsics(transforms, fname):
+    """ 
+    Reads in camera intrinsics from a transforms dictionary
+    """
+
     intrinsics = [0, 0, 0, 0]
 
     intrinsics[2] = transforms["fl_x"]
@@ -196,6 +227,10 @@ def get_transform_intrinsics(transforms, fname):
     return intrinsics
 
 def load_transform_json_data(input_path):
+    """
+    Load in poses and camera intrinsics from a transforms JSON file
+    """
+
     with open(input_path, "r") as transform_file:
         transforms = json.load(transform_file)
 
@@ -225,11 +260,9 @@ def load_transform_data(input_path):
             return load_colmap_txt_data(input_path)
         if os.path.exists(os.path.join(input_path, "images.bin")):
             return load_colmap_bin_data(input_path)
-        else:
-            raise AttributeError("Unsupported transform data type")
     else:
         file_extension = os.path.splitext(input_path)[1]
         if file_extension == ".json":
             return load_transform_json_data(input_path)
-        else:
-            raise AttributeError("Unsupported transform data type")
+
+    raise AttributeError("Unsupported transform data type")

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import torch
 
-def generate_cam_positions(radius, rings=5, sectors=5):
+"""def generate_cam_positions(radius, rings=5, sectors=5):
     ring_d = 1.0/(rings)
     sect_d = 1.0/(sectors)
 
@@ -33,7 +33,7 @@ def generate_cam_positions(radius, rings=5, sectors=5):
     return cam_positions
 
 def generate_predicted_dataset_cams(radius, conex_pattern = True):
-    pass
+    pass"""
 
 def fov2focal(fov, pixels):
     return pixels / (2 * math.tan(fov / 2))

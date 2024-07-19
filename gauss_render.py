@@ -155,7 +155,6 @@ def projection_ndc(points: torch.tensor, viewmatrix: torch.tensor, projmatrix: t
         points (torch.tensor): points to convert to ndc
         viewmatrix (torch.tensor): the view matrix of the current camera
         projmatrix (torch.tensor): the projection matrix of the current camera
-
     """
     points_o = homogeneous(points) # object space
     points_h = points_o @ viewmatrix @ projmatrix # screen space # RHS
@@ -170,6 +169,9 @@ def projection_ndc(points: torch.tensor, viewmatrix: torch.tensor, projmatrix: t
 
 @torch.no_grad()
 def get_radius(cov2d):
+    """
+    Get the 2D radii of each gaussian 
+    """
     det = cov2d[:, 0, 0] * cov2d[:,1,1] - cov2d[:, 0, 1] * cov2d[:,1,0]
     mid = 0.5 * (cov2d[:, 0,0] + cov2d[:,1,1])
     lambda1 = mid + torch.sqrt((mid**2-det).clip(min=0.1))
@@ -178,6 +180,9 @@ def get_radius(cov2d):
 
 @torch.no_grad()
 def get_rect(pix_coord, radii, width, height):
+    """
+    Calculate render tiles
+    """
     rect_min = (pix_coord - radii[:,None])
     rect_max = (pix_coord + radii[:,None])
     rect_min[..., 0] = rect_min[..., 0].clip(0, width - 1.0)
@@ -197,7 +202,7 @@ class GaussRenderer():
         self.device = means3D.get_device()
 
         # Tensor of the maximum contributions each gaussian made 
-        self.gaussian_max_rep = torch.zeros(means3D.shape[0], device=self.device)
+        self.gaussian_max_contribution = torch.zeros(means3D.shape[0], device=self.device)
 
         # Tensor of new gaussian colours calculated for point cloud generation
         self.gaussian_colours = torch.zeros((means3D.shape[0], 3), device=self.device, dtype=torch.double)
@@ -208,109 +213,136 @@ class GaussRenderer():
         self.colour = colour
 
     def get_colours(self):
-        """ returns the new calculated gaussian colours """
+        """ 
+        Returns the new calculated gaussian colours 
+        """
         return self.gaussian_colours * 255
 
     def get_seen_gaussians(self):
-        """ returns indices of gaussians that have been rendered """
-        return self.gaussian_max_rep > 0
+        """ 
+        Returns indices of gaussians that have been rendered 
+        """
+        return self.gaussian_max_contribution > 0
     
-    def render(self, camera, means2D, cov2d, color, opacity, depths, projection_mask, render_img=False):
+    def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, render_img=False):
+        """
+        Renders an image given a set of gaussians and camera transform
+
+        Args:
+            camera: the camera parameters to render the image
+            means2D: positions of the gaussians in 2D spacse
+            cov2D: 2D covariance matrices for gaussians
+            colour: colours of the gaussians
+            opacity: opacity of the gaussians
+            depths: depths of the gaussians
+            projection_mask: mask that filters gaussians not included in camera frame
+        Returns:
+            render_image: the rendered RGB image
+        """
         
         radii = get_radius(cov2d)
 
         rect = get_rect(means2D, radii, width=camera.image_width, height=camera.image_height)
         
-        self.render_color = torch.ones(*self.pix_coord.shape[:2], 3).to(self.device)
-        self.render_depth = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
-        self.render_alpha = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
+        render_colour = torch.ones(*self.pix_coord.shape[:2], 3).to(self.device)
+        #self.render_depth = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
+        #self.render_alpha = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
 
-        avg_gaussians_per_pixel = means2D.shape[0]/(camera.image_width)
-
+        # Estimate optimal tile size for fast image rendering while also not running out of memory
         recommended_gaussians_per_tile = 300**2
-
+        avg_gaussians_per_pixel = means2D.shape[0]/(camera.image_width)
         TILE_SIZE =  max(min(int(recommended_gaussians_per_tile/avg_gaussians_per_pixel),30), 5) 
 
+        # Loop through pixels in each tile
         for w in range(0, camera.image_width, TILE_SIZE):
             for h in range(0, camera.image_height, TILE_SIZE):
                 height_tile_size = min(TILE_SIZE, camera.image_height-h)
                 width_tile_size = min(TILE_SIZE, camera.image_width-w)
                 
-                # check if the rectangle penetrate the tile
+                # Calculate if Gaussian is in tile
                 over_tl = (rect[0][..., 0].clip(min=w), rect[0][..., 1].clip(min=h))
                 over_br = (rect[1][..., 0].clip(max=w+width_tile_size-1), rect[1][..., 1].clip(max=h+height_tile_size-1))
-                in_mask = (over_br[0] > over_tl[0]) & (over_br[1] > over_tl[1]) # 3D gaussian in the tile 
+                tile_mask = (over_br[0] > over_tl[0]) & (over_br[1] > over_tl[1]) # 3D gaussian in the tile 
 
-                if not in_mask.sum() > 0:
+                if not tile_mask.sum() > 0:
                     continue
 
-                P = in_mask.sum()
+                P = tile_mask.sum()
 
                 tile_coord = self.pix_coord[h:h+height_tile_size, w:w+width_tile_size].flatten(0,-2)
-
-                sorted_depths, index = torch.sort(depths[in_mask]) 
+                
+                # Order gaussians based on the depth (descending away from cam)
+                sorted_depths, index = torch.sort(depths[tile_mask]) 
 
                 index = torch.flip(index, [0,])
 
                 inverse_index = index.argsort(0)
 
-                sorted_means2D = means2D[in_mask][index]
-                sorted_cov2d = cov2d[in_mask][index] 
+                # Filter gaussians to only those in mask and reorder
+                sorted_means2D = means2D[tile_mask][index]
+                sorted_cov2d = cov2d[tile_mask][index] 
                 sorted_conic = sorted_cov2d.inverse() 
-                sorted_opacity = opacity[in_mask][index]
-                sorted_color = color[in_mask][index]
+                sorted_opacity = opacity[tile_mask][index]
+                sorted_colour = colour[tile_mask][index]
 
                 dx = (tile_coord[:,None,:] - sorted_means2D[None,:]) 
 
+                # Calculate contributions of each gaussian
                 gauss_weight = torch.exp(-0.5 * (
                     dx[:, :, 0]**2 * sorted_conic[:, 0, 0] 
                     + dx[:, :, 1]**2 * sorted_conic[:, 1, 1]
                     + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 0, 1]
                     + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 1, 0]))
 
+                # Calculate alpha and transmittance of each gaussian in pixel
                 alpha = (gauss_weight[..., None] * sorted_opacity[None]).clip(max=0.99) 
                 T = torch.cat([torch.ones_like(alpha[:,:1]), 1-alpha[:,:-1]], dim=1).cumprod(dim=1)
 
                 acc_alpha = (alpha * T).sum(dim=1)
 
-                tile_color = (T * alpha * sorted_color[None]).sum(dim=1) + (1-acc_alpha) * (1 if self.white_bkgd else 0)
+                # Calculate colour of each pixel in tile
+                tile_colour = (T * alpha * sorted_colour[None]).sum(dim=1) + (1-acc_alpha) * (1 if self.white_bkgd else 0)
                 #tile_depth = ((T * alpha) * sorted_depths[None,:,None]).sum(dim=1)
 
-                self.render_color[h:h+height_tile_size, w:w+width_tile_size] = tile_color.reshape(height_tile_size, width_tile_size, -1)
+                render_colour[h:h+height_tile_size, w:w+width_tile_size] = tile_colour.reshape(height_tile_size, width_tile_size, -1)
                 #self.render_depth[h:h+height_tile_size, w:w+width_tile_size] = tile_depth.reshape(height_tile_size, width_tile_size, -1)
                 #self.render_alpha[h:h+height_tile_size, w:w+width_tile_size] = acc_alpha.reshape(height_tile_size, width_tile_size, -1)
 
                 # Calculate Representaion of each gaussian in tile and update colours if current rep is largest
 
-                combined_mask = torch.zeros_like(self.gaussian_max_rep, dtype=torch.bool)
-                combined_mask[projection_mask] = in_mask
-
-                current_gaussian_reps = self.gaussian_max_rep[combined_mask]
+                # Get the current max representations of each gaussian by applying projection and tile mask
+                combined_mask = torch.zeros_like(self.gaussian_max_contribution, dtype=torch.bool)
+                combined_mask[projection_mask] = tile_mask
+                current_gaussian_reps = self.gaussian_max_contribution[combined_mask]
 
                 indices_in_mask = combined_mask.nonzero(as_tuple=True)[0]
 
-                rep = ((T * alpha)).squeeze(2)[:, inverse_index]
+                # Calculate the represntation of each gaussian for the current pixels 
+                # This is the amount it contributed to the pixel colour and is what is used to determine what colour the points of each gaussian should have!
+                contribution = ((T * alpha)).squeeze(2)[:, inverse_index]
 
-                biggest_rep_in_tile = torch.max(rep, 0)
+                # Get what pixel the gaussian contributed the most and what its biggest contribution value was
+                biggest_contribution_in_tile = torch.max(contribution, 0)
+                biggest_contribution_in_tile_vals = biggest_contribution_in_tile[0]
+                biggest_contribution_in_tile_pixel = biggest_contribution_in_tile[1]
 
-                biggest_rep_in_tile_vals = biggest_rep_in_tile[0]
-                biggest_rep_in_tile_pixel = biggest_rep_in_tile[1]
-
-                new_gaussians = biggest_rep_in_tile_vals > current_gaussian_reps
+                # Filter gaussians that have a new biggest contribution
+                new_gaussians = biggest_contribution_in_tile_vals > current_gaussian_reps
 
                 new_gaussian_mask_indices = new_gaussians.nonzero()
 
                 gaussians_to_update = indices_in_mask[new_gaussian_mask_indices]
 
-                self.gaussian_max_rep[gaussians_to_update] = biggest_rep_in_tile_vals[new_gaussians].unsqueeze(1)
-                self.gaussian_colours[gaussians_to_update] = tile_color[biggest_rep_in_tile_pixel[new_gaussians]].unsqueeze(1)
+                # Update the colours and maximum contributions
+                self.gaussian_max_contribution[gaussians_to_update] = biggest_contribution_in_tile_vals[new_gaussians].unsqueeze(1)
+                self.gaussian_colours[gaussians_to_update] = tile_colour[biggest_contribution_in_tile_pixel[new_gaussians]].unsqueeze(1)
 
-        self.render_color =  torch.flip(self.render_color, [1,])
+        render_colour =  torch.flip(render_colour, [1,])
 
-        return self.render_color
+        return render_colour
 
        #""" return {
-       #     "render": self.render_color,
+       #     "render": self.render_colour,
        #     #"depth": self.render_depth,
        #     #"alpha": self.render_alpha,
        #     "visiility_filter": radii > 0,
@@ -319,9 +351,14 @@ class GaussRenderer():
        # }"""
 
     def add_img(self, camera, **kwargs):
-
+        """
+        Renders an image from the given camera and updates the gaussian colours 
+        """
+        
+        # Reset the pixel coordinates to current camera parameters
         self.pix_coord = torch.stack(torch.meshgrid(torch.arange(camera.image_width), torch.arange(camera.image_height), indexing='xy'), dim=-1).to(self.device)
 
+        # Calculate 2D coveriance matrix
         cov2d = build_covariance_2d(
                 mean3d=self.means3D, 
                 cov3d=self.cov3d, 
@@ -331,6 +368,7 @@ class GaussRenderer():
                 focal_x=camera.focal_x, 
                 focal_y=camera.focal_y)
 
+        # Project gaussians into 2D and filter gaussians outside of view range
         mean_ndc, mean_view, in_mask = projection_ndc(self.means3D, 
                     viewmatrix=camera.world_view_transform, 
                     projmatrix=camera.projection_matrix)
@@ -340,17 +378,18 @@ class GaussRenderer():
         depths = mean_view[:,2]
         cov2d = cov2d[in_mask]
         opacity = self.opacity[in_mask]
-        current_color = self.colour[in_mask]
+        current_colour = self.colour[in_mask]
 
         mean_coord_x = ((mean_ndc[..., 0] + 1) * camera.image_width - 1.0) * 0.5
         mean_coord_y = ((mean_ndc[..., 1] + 1) * camera.image_height - 1.0) * 0.5
         means2D = torch.stack([mean_coord_x, mean_coord_y], dim=-1)
 
+        # Render new image
         rets = self.render(
             camera=camera, 
             means2D=means2D,
             cov2d=cov2d,
-            color=current_color,
+            colour=current_colour,
             opacity=opacity, 
             depths=depths,
             projection_mask=in_mask

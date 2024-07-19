@@ -1,15 +1,22 @@
 import os
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from plyfile import PlyData, PlyElement
 
 def computeColorFromLowDegSH(sh):
+    """
+    Calculates colour from first degree spherical harminics
+    """
     SH_C0 = 0.28209479177387814
     
     return ((SH_C0 * sh[:,:,0].to(torch.double)) + 0.5).clip(0, 1).type(torch.double) 
 
 def load_ply_data(path, max_sh_degree=3):
+    """
+    Loads in Gaussians from .ply file
+    """
     plydata = PlyData.read(path)
 
     xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
@@ -57,6 +64,10 @@ def load_ply_data(path, max_sh_degree=3):
     return xyz_tensor, scales_tensor, rots_tensor, colours, opacities
 
 def load_splat_data(path):
+    """
+    Loads in Gaussians from .splat file
+    """
+
     with open(path, "rb") as test_file:
         file_content = test_file.read()
     
@@ -90,10 +101,11 @@ def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, chunk_size=10**6):
     """
     Save a series of XYZ points to a PLY file.
 
-    Parameters:
-    xyz_points (numpy.ndarray): An array of shape (N, 3) containing XYZ coordinates.
-    filename (str): The name of the output PLY file.
-    rgb_colors (numpy.ndarray, optional): An array of shape (N, 3) containing RGB colors. Defaults to white.
+    Args:
+        xyz_points: An array of shape (N, 3) containing XYZ coordinates.
+        filename: The name of the output PLY file.
+        rgb_colors: An array of shape (N, 3) containing RGB colors. Defaults to white.
+        chunk_size: Sizes of chunks that will be saved iteratively (reduces chances of out of memory errors)
     """
 
     # Ensure the points are in the correct format
@@ -121,7 +133,7 @@ end_header
 """
         ply_file.write(header.encode('utf-8'))
 
-        for i in range(num_chunks):
+        for i in tqdm(range(num_chunks), position=0, leave=True):
             start_idx = i * chunk_size
             end_idx = min(start_idx + chunk_size, total_points)
 
@@ -140,7 +152,6 @@ end_header
             vertex['blue'] = colors_chunk[:, 2]
 
             ply_file.write(vertex.tobytes())
-
 
 def load_gaussians(input_path):
     file_extension = os.path.splitext(input_path)[1]

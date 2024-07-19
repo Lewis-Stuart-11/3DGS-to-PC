@@ -3,6 +3,11 @@ import torch
 
 from math import floor
 
+"""
+These functions convert a gaussian scale and rotation into a covariance matrix.
+Originally provided: https://github.com/graphdeco-inria/gaussian-splatting
+"""
+
 def strip_lowerdiag(L):
     uncertainty = torch.zeros((L.shape[0], 6), dtype=torch.float, device="cuda")
 
@@ -56,7 +61,11 @@ def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
     actual_covariance = L @ L.transpose(1, 2)
     return actual_covariance
 
-class Gaussian():
+class Gaussians():
+    """
+    Manages all loaded gaussians in the renderer
+    """
+
     def __init__(self, xyz, scales, rots, colours, opacities):
         self.xyz = xyz
         self.scales = scales
@@ -66,32 +75,46 @@ class Gaussian():
 
         self.scaling_modifier = 1.0
 
+        # Calculates 3D covariance matrices
         covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
         self.covariances = self.regularise_covariances(covariances)
 
-        self.gaussian_colours = colours
-
     def regularise_covariances(self, covariances):
+        """
+        Regularises ensures that all gaussian covariances are positive semidefinite 
+        since sometimes gaussian values are slightly wrong when loaded (most likely due to floating point errors)
+        """
         epsilon = 1e-6
         eye_matrix = epsilon * torch.eye(3, device=self.xyz.get_device()).expand(covariances.shape[0], 3, 3)
         covariances += eye_matrix
         return covariances
 
     def filter_gaussians(self, filter_indices):
+        """
+        Filters gaussians based on given indices
+        """
+
         self.xyz = self.xyz[filter_indices]
         self.scales = self.scales[filter_indices]
         self.rots = self.rots[filter_indices]
         self.colours = self.colours[filter_indices]
         self.opacities = self.opacities[filter_indices]
         self.covariances = self.covariances[filter_indices]
-        self.gaussian_colours = self.gaussian_colours[filter_indices]
 
     def apply_min_opacity(self, min_opacity):
-        valid_gaussians_indices = self.opacities > (min_opacity)
+        """
+        Removes gaussians with opacity lower than the min_opacity
+        """
 
-        self.filter_gaussians(valid_gaussians_indices)
+        if min_opacity > 0.0:
+            valid_gaussians_indices = self.opacities > (min_opacity)
+
+            self.filter_gaussians(valid_gaussians_indices)
 
     def apply_bounding_box(self, bounding_box_min, bounding_box_max):
+        """
+        Removes gaussians outside of the bounding box
+        """
 
         valid_gaussians_indices = torch.logical_not(torch.zeros(self.xyz.shape[0], dtype=torch.bool, device=self.xyz.get_device()))
 
@@ -109,10 +132,14 @@ class Gaussian():
 
         self.filter_gaussians(valid_gaussians_indices)
 
-    def cull_large_gaussians(self, cull_large_percentage):
+    def cull_large_gaussians(self, cull_gauss_size_percent):
+        """
+        Orders the gaussians by size and removes gaussians with a size greater than the 'cull_gauss_size_percent'
+        """
+
         gaussian_sizes = self.get_gaussian_sizes()
 
-        cull_index = floor(gaussian_sizes.shape[0] *(1-cull_large_percentage))
+        cull_index = floor(gaussian_sizes.shape[0] *(1-cull_gauss_size_percent))
 
         sorted_sizes, sorted_indices = torch.sort(gaussian_sizes)
 
@@ -121,6 +148,9 @@ class Gaussian():
         self.filter_gaussians(culled_gaussians)
 
     def get_gaussian_sizes(self):
+        """
+        Orders the gaussians by volume size 
+        """
         return torch.sum(torch.exp(self.scales * self.scaling_modifier), axis=1)
 
 
