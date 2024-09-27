@@ -53,6 +53,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | std_distance         |    2.0         |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
 | min_opacity          |    0.0         |  Minimum opacity for gaussians that will be included (must be between 0-1) |
 | cull_gaussian_sizes  |    0.0         |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
+| max_sh_degrees       |    3           |  The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded) |
 
 ## How this works
 
