@@ -193,7 +193,8 @@ def imwrite(path, image):
 
 def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=True, transform_path=None,
                         min_opacity=0.0, bounding_box_min=None, bounding_box_max=None, 
-                        cull_large_percentage=0.0, remove_unrendered_gaussians=True, colour_resolution=1920, device="cuda:0"):
+                        cull_large_percentage=0.0, remove_unrendered_gaussians=True, colour_resolution=1920,
+                        max_sh_degree=3, device="cuda:0"):
 
     """
     Generates a pointcloud from a 3DGS file
@@ -219,7 +220,7 @@ def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=T
     print("Loading Gaussians from File")
     
     # Load gaussian data from file
-    xyz, scales, rots, colours, opacities = load_gaussians(input_path)
+    xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=max_sh_degree)
 
     # Format gaussians
     gaussians = Gaussians(xyz, scales, rots, colours, opacities)
@@ -377,6 +378,8 @@ def config_parser():
 
     parser.add_argument("--cull_gaussian_sizes", type=float, default=0.0, help="The percentage of gaussians to remove from largest to smallest (used to remove large gaussians)")
 
+    parser.add_argument("--max_sh_degree", type=int, default=3, help="The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded)")
+
     args = parser.parse_args()
 
     if args.min_opacity < 0 or args.min_opacity > 1:
@@ -409,6 +412,9 @@ def config_parser():
     if args.colour_quality.lower() not in COLOR_QUALITY_OPTIONS.keys():
          raise AttributeError(f"Colour quality must be in the following options {COLOR_QUALITY_OPTIONS.keys()}")
 
+    if args.max_sh_degree < 0:
+        raise AttributeError(f"The number of spherical harmonics must be larger than 0")
+
     return args
 
 def main():
@@ -419,7 +425,8 @@ def main():
     # Get point cloud 
     total_points, total_colours = generate_pointcloud(args.input_path, args.num_points, std_distance=args.std_distance, render_colours=not args.skip_render_colours,
                                                       transform_path=args.transform_path, min_opacity=args.min_opacity, bounding_box_min=args.bounding_box_min, bounding_box_max=args.bounding_box_max,
-                                                      cull_large_percentage=args.cull_gaussian_sizes, colour_resolution=int(COLOR_QUALITY_OPTIONS[args.colour_quality.lower()]), device=device)
+                                                      cull_large_percentage=args.cull_gaussian_sizes, colour_resolution=int(COLOR_QUALITY_OPTIONS[args.colour_quality.lower()]),
+                                                      max_sh_degree=args.max_sh_degree, device=device)
 
     print("Saving final Point Cloud")
 

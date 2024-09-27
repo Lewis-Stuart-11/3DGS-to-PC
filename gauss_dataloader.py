@@ -153,11 +153,11 @@ end_header
 
             ply_file.write(vertex.tobytes())
 
-def load_gaussians(input_path):
+def load_gaussians(input_path, max_sh_degree=3):
     file_extension = os.path.splitext(input_path)[1]
     if file_extension == ".splat":
         return load_splat_data(input_path)
     elif file_extension == ".ply":
-        return load_ply_data(input_path)
+        return load_ply_data(input_path, max_sh_degree=max_sh_degree)
     else:
         raise AttributeError("Unsupported input type {file_extension}")
