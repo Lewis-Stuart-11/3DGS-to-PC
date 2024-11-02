@@ -75,18 +75,43 @@ class Gaussians():
 
         self.scaling_modifier = 1.0
 
-        # Calculates 3D covariance matrices
+            # Calculates 3D covariance matrices
         covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
-        self.covariances = self.regularise_covariances(covariances)
+        self.covariances = self.validate_covariances(covariances)
 
-    def regularise_covariances(self, covariances):
+    def non_posdef_covariances(self, covariances):
         """
-        Regularises ensures that all gaussian covariances are positive semidefinite 
+        Returns a boolean mask of which covariances are definitepositive
+        """
+        return torch.any(torch.linalg.eigvals(covariances).real <= 0, 1)
+
+    def regularise_covariances(self, covariances, mask=None, epsilon=1e-6):
+        """
+        Increases the value of the diagonal of the covariances matrices to ensure it is positive-definite
+        """
+        if mask is None:
+            mask = torch.ones(covariances.shape[0], dtype=torch.bool)
+
+        eye_matrix = epsilon * torch.eye(3, device=self.xyz.get_device()).expand(mask.sum(), 3, 3)
+        covariances[mask] += eye_matrix
+
+        return covariances
+
+    def validate_covariances(self, covariances):
+        """
+        Regularises Gaussian covariances and ensures that all covariances are positive-definite
         since sometimes gaussian values are slightly wrong when loaded (most likely due to floating point errors)
         """
-        epsilon = 1e-6
-        eye_matrix = epsilon * torch.eye(3, device=self.xyz.get_device()).expand(covariances.shape[0], 3, 3)
-        covariances += eye_matrix
+
+        # Regularises gaussians with a low factor, which ensures almost all covaricnes are positive-definite
+        covariances = self.regularise_covariances(covariances)
+        
+        # Check if any non positive-definite covariances exist, if so, apply strong regularisation to ensure
+        # all covariances are positive-definite
+        non_positive_covariances = self.non_posdef_covariances(covariances)
+        if non_positive_covariances.sum() > 0:
+            covariances = self.regularise_covariances(covariances, mask=non_positive_covariances, epsilon=0.001)
+
         return covariances
 
     def filter_gaussians(self, filter_indices):
