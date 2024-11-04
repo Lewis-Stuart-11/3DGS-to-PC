@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import time
 
 from math import floor
 
@@ -75,15 +76,32 @@ class Gaussians():
 
         self.scaling_modifier = 1.0
 
-            # Calculates 3D covariance matrices
+        # Calculates 3D covariance matrices
         covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
-        self.covariances = self.validate_covariances(covariances)
+
+        # Validate and add covariances matrices
+        self.validate_and_add_covariances(covariances)
 
     def non_posdef_covariances(self, covariances):
         """
         Returns a boolean mask of which covariances are definitepositive
         """
         return torch.any(torch.linalg.eigvals(covariances).real <= 0, 1)
+
+    def clamp_covariances(self, covariances, mask=None, epsilon=1e-6):
+        """
+        Clips Eigenvalues to positive to enforce covariances to be positive-definite
+        Credit: MultiTrickFox
+        """
+        
+        if mask is None:
+            mask = torch.ones(covariances.shape[0], dtype=torch.bool)
+            
+        eigvals, eigvecs = torch.linalg.eigh(covariances[mask])
+        eigvals = torch.clamp(eigvals, min=epsilon)
+        covariances[mask] = eigvecs @ torch.diag_embed(eigvals) @ eigvecs.transpose(-1, -2)
+
+        return covariances
 
     def regularise_covariances(self, covariances, mask=None, epsilon=1e-6):
         """
@@ -97,7 +115,7 @@ class Gaussians():
 
         return covariances
 
-    def validate_covariances(self, covariances):
+    def validate_and_add_covariances(self, covariances):
         """
         Regularises Gaussian covariances and ensures that all covariances are positive-definite
         since sometimes gaussian values are slightly wrong when loaded (most likely due to floating point errors)
@@ -106,13 +124,18 @@ class Gaussians():
         # Regularises gaussians with a low factor, which ensures almost all covaricnes are positive-definite
         covariances = self.regularise_covariances(covariances)
         
-        # Check if any non positive-definite covariances exist, if so, apply strong regularisation to ensure
+        # Check if any non positive-definite covariances exist, if so, clamp gaussians to ensure
         # all covariances are positive-definite
         non_positive_covariances = self.non_posdef_covariances(covariances)
         if non_positive_covariances.sum() > 0:
-            covariances = self.regularise_covariances(covariances, mask=non_positive_covariances, epsilon=0.001)
+            covariances = self.clamp_covariances(covariances, mask=non_positive_covariances, epsilon=0.001)
 
-        return covariances
+        self.covariances = covariances
+
+        # If still not positive-definite then delete erroneous Gaussians
+        non_positive_covariances = self.non_posdef_covariances(covariances)
+        if non_positive_covariances.sum() > 0:
+            self.filter_gaussians(~non_positive_covariances)
 
     def filter_gaussians(self, filter_indices):
         """
@@ -124,6 +147,8 @@ class Gaussians():
         self.rots = self.rots[filter_indices]
         self.colours = self.colours[filter_indices]
         self.opacities = self.opacities[filter_indices]
+
+        
         self.covariances = self.covariances[filter_indices]
 
     def apply_min_opacity(self, min_opacity):
