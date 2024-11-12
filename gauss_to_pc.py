@@ -10,6 +10,7 @@ import imageio
 from tqdm import tqdm
 from math import cos, sin, pi, sqrt, tan, ceil, exp, floor
 from torch.distributions.multivariate_normal import MultivariateNormal
+from typing import NamedTuple
 
 from gauss_handler import Gaussians
 
@@ -19,7 +20,36 @@ from gauss_dataloader import load_gaussians, save_xyz_to_ply
 from gauss_render import GaussRenderer
 from camera_handler import Camera
 
-COLOR_QUALITY_OPTIONS = {"low": 360, "medium": 720, "high": 1280, "ultra": 1920}
+COLOR_QUALITY_OPTIONS = {"tiny": 180, "low": 360, "medium": 720, "high": 1280, "ultra": 1920}
+
+class GaussPointCloudSettings(NamedTuple):
+    """
+    Properties:
+        num_points: the number of points to generate for the point cloud
+        std_distance: the max distance that a sampled point can be from its gaussian centre before being rejected
+        render_colours: whether to render point colours or to use the given gaussian colours (rendering is recommended)
+        min_opacity: filter gaussians with an opacity less than the min_opacity
+        bounding_box_min: minimum values of the bounding box 
+        bounding_box_max: maximum values of the bounding box 
+        cull_large_percentage: percentage of the gaussians to remove (from largest to smallest)
+        remove_unrendered_gaussians: gaussians that were not rendered, based on the cameras from the transform_path, are not included in the point cloud
+        colour_resolution: resolution of the image to render for determining the point colours
+        exact_num_points: number of attempts to generate all points for gaussians with the same number of assigned points 
+        device: torch device
+    """
+    num_points: int
+    std_distance: float
+    camera_skip_rate: int
+    render_colours: bool 
+    min_opacity: float
+    bounding_box_min: list
+    bounding_box_max: list
+    cull_large_percentage: float
+    remove_unrendered_gaussians: bool
+    colour_resolution: int
+    max_sh_degree: int
+    exact_num_points: int
+    device: str
 
 def distribute_points(gaussian_sizes, num_points):
     """
@@ -191,45 +221,39 @@ def imwrite(path, image):
     """
     imageio.imwrite(path, ((255 * np.clip(image, 0, 1)).astype(np.uint8)))
 
-def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=True, transform_path=None,
-                        min_opacity=0.0, bounding_box_min=None, bounding_box_max=None, 
-                        cull_large_percentage=0.0, remove_unrendered_gaussians=True, colour_resolution=1920,
-                        max_sh_degree=3, device="cuda:0"):
+def generate_pointcloud(input_path, transform_path, pointcloud_settings):
 
     """
     Generates a pointcloud from a 3DGS file
 
     Args:
         input_path: the path to the file containing the gaussian data
-        num_points: the number of points to generate for the point cloud
-        std_distance: the max distance that a sampled point can be from its gaussian centre before being rejected
-        render_colours: whether to render point colours or to use the given gaussian colours (rendering is recommended)
-        transform_path: path to the file containing transform data for rendering colours
-        min_opacity: filter gaussians with an opacity less than the min_opacity
-        bounding_box_min: minimum values of the bounding box 
-        bounding_box_max: maximum values of the bounding box 
-        cull_large_percentage: percentage of the gaussians to remove (from largest to smallest)
-        remove_unrendered_gaussians: gaussians that were not rendered, based on the cameras from the transform_path, are not included in the point cloud
-        colour_resolution: resolution of the image to render for determining the point colours
-        device: torch device
+        transform_path: the path to the file containing transform data for rendering colours
+        pointcloud_settings: contains all configuration information for generating the point cloud
     Returns:
         total_points: all points in the generated point cloud
         total_colours: colours of each of the points in the generated point cloud
     """
 
+    # Transform path has been provided, so use those camera positions and intrinsics 
+    if transform_path is not None:
+        print("Loading Camera Poses")
+
+        transforms, intrinsics = load_transform_data(transform_path, skip_rate=pointcloud_settings.camera_skip_rate)
+
     print("Loading Gaussians from File")
     
     # Load gaussian data from file
-    xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=max_sh_degree)
+    xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
 
     # Format gaussians
     gaussians = Gaussians(xyz, scales, rots, colours, opacities)
-    gaussians.apply_min_opacity(min_opacity)
-    gaussians.apply_bounding_box(bounding_box_min, bounding_box_max)
-    gaussians.cull_large_gaussians(cull_large_percentage)
+    gaussians.apply_min_opacity(pointcloud_settings.min_opacity)
+    gaussians.apply_bounding_box(pointcloud_settings.bounding_box_min, pointcloud_settings.bounding_box_max)
+    gaussians.cull_large_gaussians(pointcloud_settings.cull_large_percentage)
 
     # Rendered colours has been set 
-    if render_colours:
+    if pointcloud_settings.render_colours:
 
         print("Rendering Gaussian Colours")
 
@@ -237,24 +261,21 @@ def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=T
         gaussian_renderer = GaussRenderer(gaussians.xyz, torch.unsqueeze(torch.clone(gaussians.opacities), 1).type(torch.float),
                                               gaussians.colours, gaussians.covariances)
         
-        # Transform path has been provided, so use those camera positions and intrinsics 
         if transform_path is not None:
-
-            transforms, intrinsics = load_transform_data(transform_path)
 
             # Render colours for each camera
             for i in tqdm(range(len(transforms)), position=0, leave=True):
 
                 img_name, transform = list(transforms.items())[i]
 
-                transform = torch.tensor(list(transform), device=device)
+                transform = torch.tensor(list(transform), device=pointcloud_settings.device)
 
                 cam_intrinsic = intrinsics[img_name]
 
-                cam_matrix = torch.eye(4, device=device) 
+                cam_matrix = torch.eye(4, device=pointcloud_settings.device) 
 
                 # Rescale cam parameters to match the given render resolution
-                diff = colour_resolution / int(cam_intrinsic[0])
+                diff = pointcloud_settings.colour_resolution / int(cam_intrinsic[0])
 
                 img_width = int(int(cam_intrinsic[0]) * diff) 
                 img_height = int(int(cam_intrinsic[1]) * diff) 
@@ -279,7 +300,7 @@ def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=T
         gaussians.colours = gaussian_renderer.get_colours()
 
         # Remove gaussians that were not rendered at all
-        if remove_unrendered_gaussians:
+        if pointcloud_settings.remove_unrendered_gaussians:
             gaussians.filter_gaussians(gaussian_renderer.get_seen_gaussians())
 
         del gaussian_renderer
@@ -295,20 +316,22 @@ def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=T
     print()
 
     # Assign points to gaussians 
-    points_per_gaussian = distribute_points(gaussian_sizes, num_points).type(torch.int)
+    points_per_gaussian = distribute_points(gaussian_sizes, pointcloud_settings.num_points).type(torch.int)
 
-    start_bin, bin_size = calculate_bin_sizes(points_per_gaussian)
-
-    # Bin gaussians together (makes the generation process faster)
     point_distribution = torch.unique(points_per_gaussian)
-    point_distribution = torch.cat((point_distribution[:start_bin],  torch.mul(torch.unique(torch.ceil(point_distribution[start_bin:]/ bin_size)), bin_size)), 0)
 
-    total_points = torch.tensor([], device=device)
-    total_colours = torch.tensor([], device=device).type(torch.double)
+    if not pointcloud_settings.exact_num_points:
+        start_bin, bin_size = calculate_bin_sizes(points_per_gaussian)
 
-    num_attempts = 5
+        # Bin gaussians together (makes the generation process faster)
+        point_distribution = torch.cat((point_distribution[:start_bin],  torch.mul(torch.unique(torch.ceil(point_distribution[start_bin:]/ bin_size)), bin_size)), 0)
+
+    total_points = torch.tensor([], device=pointcloud_settings.device)
+    total_colours = torch.tensor([], device=pointcloud_settings.device).type(torch.double)
 
     print(f"Starting Point Cloud Generation")
+
+    num_sample_attempts = 5 if not pointcloud_settings.exact_num_points else 100
 
     # Iterate through different number of points 
     for i in tqdm(range(point_distribution.shape[0]-1), position=0, leave=True):
@@ -342,7 +365,8 @@ def generate_pointcloud(input_path, num_points, std_distance=2, render_colours=T
 
         # Sample the rest of the required points
         new_points, new_colours = create_new_gaussian_points(num_points_for_gaussian-1, mean_for_point, covariances_for_point,
-                                                             centre_colours, std_distance=std_distance, num_attempts=num_attempts, device=device)
+                                                             centre_colours, std_distance=pointcloud_settings.std_distance, 
+                                                             num_attempts=num_sample_attempts, device=pointcloud_settings.device)
 
         total_points = torch.cat((total_points, new_points), 0)
         total_colours = torch.cat((total_colours, new_colours), 0)
@@ -363,14 +387,16 @@ def config_parser():
     parser.add_argument("--output_path",  type=str, default="3dgs_pc.ply", help="Path to output file (must be ply file)")
 
     parser.add_argument("--transform_path", type=str, help="Path to COLMAP or Transform file used for loading in camera positions for rendering")
+    parser.add_argument("--camera_skip_rate", type=int, default=0, help="Number of cameras to skip for each rendered camera (reduces compute time- only use if cameras in linear trajectory)")
     
-    parser.add_argument("--skip_render_colours", action="store_true", help="Skip rendering colours- faster but colours will be strange")
+    parser.add_argument("--no_render_colours", action="store_true", help="Skip rendering colours- faster but colours will be strange")
     parser.add_argument("--colour_quality", type=str, default="medium", help="The quality of the colours when generating the point cloud (more quality = slower processing time)")
 
     parser.add_argument("--bounding_box_min", nargs=3, help="Values for minimum position of gaussians to include in generating the new point cloud")
     parser.add_argument("--bounding_box_max", nargs=3, help="Values for maximum position of gaussians to include in generating the new point cloud")
 
     parser.add_argument("--num_points", type=int, default=10000000, help="Total number of points to generate for the pointcloud")
+    parser.add_argument("--exact_num_points", action="store_true", help="Set if the number of generated points should more closely match the num_points argument (slower)")
 
     parser.add_argument("--std_distance", type=float, default=2.0, help="Maximum distance each point can be from the centre of their gaussian")
 
@@ -391,7 +417,7 @@ def config_parser():
     if args.num_points <= 0:
         raise AttributeError("Number of points must be greater than 0")
     
-    if  args.bounding_box_min is not None:
+    if args.bounding_box_min is not None:
         try:
             args.bounding_box_min = [float(x) for x in args.bounding_box_min]
         except ValueError:
@@ -400,7 +426,7 @@ def config_parser():
         if len(args.bounding_box_min) != 3:
             raise AttributeError("Bounding Box Min must have exactly 3 values")
 
-    if  args.bounding_box_max is not None:
+    if args.bounding_box_max is not None:
         try:
             args.bounding_box_max = [float(x) for x in args.bounding_box_max]
         except ValueError:
@@ -415,18 +441,32 @@ def config_parser():
     if args.max_sh_degree < 0:
         raise AttributeError(f"The number of spherical harmonics must be larger than 0")
 
+    if args.camera_skip_rate < 0:
+        raise AttributeError(f"The camera skip rate must be larger than 0")
+
     return args
 
 def main():
     args = config_parser()
 
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    pointcloud_settings = GaussPointCloudSettings(
+        num_points=args.num_points,
+        std_distance=args.std_distance,
+        camera_skip_rate=args.camera_skip_rate,
+        render_colours=not args.no_render_colours,
+        min_opacity=args.min_opacity,
+        bounding_box_min=args.bounding_box_min, 
+        bounding_box_max=args.bounding_box_max, 
+        cull_large_percentage=args.cull_gaussian_sizes, 
+        colour_resolution=int(COLOR_QUALITY_OPTIONS[args.colour_quality.lower()]),
+        max_sh_degree=args.max_sh_degree, 
+        exact_num_points = args.exact_num_points,
+        remove_unrendered_gaussians = True,
+        device="cuda:0" if torch.cuda.is_available() else "cpu"
+    )
 
     # Get point cloud 
-    total_points, total_colours = generate_pointcloud(args.input_path, args.num_points, std_distance=args.std_distance, render_colours=not args.skip_render_colours,
-                                                      transform_path=args.transform_path, min_opacity=args.min_opacity, bounding_box_min=args.bounding_box_min, bounding_box_max=args.bounding_box_max,
-                                                      cull_large_percentage=args.cull_gaussian_sizes, colour_resolution=int(COLOR_QUALITY_OPTIONS[args.colour_quality.lower()]),
-                                                      max_sh_degree=args.max_sh_degree, device=device)
+    total_points, total_colours = generate_pointcloud(args.input_path, args.transform_path, pointcloud_settings)
 
     print("Saving final Point Cloud")
 

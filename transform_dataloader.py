@@ -114,7 +114,7 @@ def get_colmap_img_transform(elems):
 
     return c2w_flipped.tolist()
 
-def load_colmap_bin_data(input_path):
+def load_colmap_bin_data(input_path, skip_rate=0):
     """
     Load in transforms and camera intrinsics from a COLMAP directory of bin files
     """
@@ -127,6 +127,7 @@ def load_colmap_bin_data(input_path):
 
     colmap_cameras = get_colmap_bin_intrinsics(intrinsics_file_path)
 
+    i = 0
     with open(transform_file_path, "rb") as colmap_file:
         num_reg_images = read_next_bytes(colmap_file, 8, "Q")[0]
         for _ in range(num_reg_images):
@@ -156,13 +157,16 @@ def load_colmap_bin_data(input_path):
                 format_char_sequence="ddq" * num_points2D,
             )
 
-            colmap_transforms[name] = transform
-            transform_cameras[name] = colmap_cameras[camera_id]
+            if i % (skip_rate + 1) == 0:
+                colmap_transforms[name] = transform
+                transform_cameras[name] = colmap_cameras[camera_id]
+
+            i += 1
     
 
     return colmap_transforms, transform_cameras
 
-def load_colmap_txt_data(input_path):
+def load_colmap_txt_data(input_path, skip_rate=0):
     """
     Load in poses and camera intrinsics from a COLMAP directory of txt files
     """
@@ -187,16 +191,18 @@ def load_colmap_txt_data(input_path):
             if len(line) == 0:
                 continue
 
-            if  i % 2 == 1:
-                elems = line.split(" ")
+            if i % 2 == 1:
 
-                camera_id = int(elems[8])
-                name = str(elems[9])
+                if i % (skip_rate + 1) == 0:
+                    elems = line.split(" ")
 
-                transform = get_colmap_img_transform(elems)
+                    camera_id = int(elems[8])
+                    name = str(elems[9])
 
-                colmap_transforms[name] = transform
-                transform_cameras[name] = colmap_cameras[camera_id]
+                    transform = get_colmap_img_transform(elems)
+
+                    colmap_transforms[name] = transform
+                    transform_cameras[name] = colmap_cameras[camera_id]
 
     return colmap_transforms, transform_cameras
 
@@ -226,7 +232,7 @@ def get_transform_intrinsics(transforms, fname):
 
     return intrinsics
 
-def load_transform_json_data(input_path):
+def load_transform_json_data(input_path, skip_rate=0):
     """
     Load in poses and camera intrinsics from a transforms JSON file
     """
@@ -240,8 +246,8 @@ def load_transform_json_data(input_path):
     all_intrinsics = None 
     if "fl_x" in transforms.keys():
         all_intrinsics = get_transform_intrinsics(transforms, transforms["frames"][0]["file_path"])
-
-    for frame in transforms["frames"]:
+    
+    for i, frame in enumerate(transforms["frames"]):
         fname = os.path.basename(frame["file_path"])
         transform = frame["transform_matrix"]
 
@@ -250,19 +256,28 @@ def load_transform_json_data(input_path):
         else:
             intrinsics[fname] = all_intrinsics
 
-        json_transforms[fname] = transform 
+        if i % (skip_rate + 1) == 0:
+            json_transforms[fname] = transform 
 
     return json_transforms, intrinsics
 
-def load_transform_data(input_path):
+def load_transform_data(input_path, skip_rate=0):
     if os.path.isdir(input_path):
         if os.path.exists(os.path.join(input_path, "images.txt")):
-            return load_colmap_txt_data(input_path)
+            return load_colmap_txt_data(input_path, skip_rate=skip_rate)
         if os.path.exists(os.path.join(input_path, "images.bin")):
-            return load_colmap_bin_data(input_path)
+            return load_colmap_bin_data(input_path, skip_rate=skip_rate)
+        
+        # Check if transforms directory path is of the standard 3DGS dataset convention
+        input_path = os.path.join(input_path, "sparse", "0")
+        if os.path.exists(input_path):
+            if os.path.exists(os.path.join(input_path, "images.txt")):
+                return load_colmap_txt_data(input_path, skip_rate=skip_rate)
+            if os.path.exists(os.path.join(input_path, "images.bin")):
+                return load_colmap_bin_data(input_path, skip_rate=skip_rate)
     else:
         file_extension = os.path.splitext(input_path)[1]
         if file_extension == ".json":
-            return load_transform_json_data(input_path)
+            return load_transform_json_data(input_path, skip_rate=skip_rate)
 
     raise AttributeError("Unsupported transform data type")
