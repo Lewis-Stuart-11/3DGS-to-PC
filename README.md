@@ -4,6 +4,8 @@ Gaussian Splatting can generate extremely high quality 3D representations of a s
 
 This repo offers scripts for converting a 3D Gaussian Splatting scene into a dense point cloud. The generated point clouds are high-quality and effectively imitate the original 3DGS scenes. Extra functionality is offered to customise the creation of the point cloud.
 
+**Showcase:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
+
 <p>
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="350" />
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdsM3k2Z3JlZ296eDZpOWlwNHc0cjZpZHA1djdoeDU3c3h0a2ZveSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z9Cd1ENioEBGHxXcbs/giphy-downsized-large.gif" width="350" /> 
@@ -48,7 +50,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | camera_skip_rate     |    0           |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
 | num_points           |    10000000    |  Total number of points to generate for the pointcloud |
 | exact_num_points     |    False       |  Set if the number of generated points should more closely match the num_points argument (slower) |
-| skip_render_colours  |    False       |  Skip rendering colours- faster but colours will be strange |
+| no_render_colours    |    False       |  Skip rendering colours- faster but colours will be strange |
 | colour_quality       |    medium      |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high and ultra |
 | bounding_box_min     |    -           |  Values for minimum position of gaussians to include in generating the new point cloud  |
 | bounding_box_max     |    -           |  Values for maximum position of gaussians to include in generating the new point cloud  |
@@ -57,7 +59,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | cull_gaussian_sizes  |    0.0         |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
 | max_sh_degrees       |    3           |  The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded) |
 
-## How to Increase Speed
+## How to increase speed
 
 While the generated point clouds have a high accuracy and precise colours, the process can be slower than desired (especially for scenes with millions of Gaussians). There are several ways that speed can be increased without substantially impacting the final quality of the point cloud:
 1) Set camera_skip_rate to a value where overlapping images are not rendered (e.g. we set camera_skip_rate = 4 for the mip dataset). We found that setting this value significantly reduced compile time, while not directly impacting the quality of the final reconstruction. Only do this if the camera poses are ordered in a linear trajectory around your scene and the camera poses overlap considerably.

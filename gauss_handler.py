@@ -147,8 +147,6 @@ class Gaussians():
         self.rots = self.rots[filter_indices]
         self.colours = self.colours[filter_indices]
         self.opacities = self.opacities[filter_indices]
-
-        
         self.covariances = self.covariances[filter_indices]
 
     def apply_min_opacity(self, min_opacity):
@@ -199,9 +197,9 @@ class Gaussians():
 
     def get_gaussian_sizes(self):
         """
-        Orders the gaussians by volume size 
+        Orders the gaussians by volume size after calculating the exponent (to prioritse larger Gaussians)
         """
-        return torch.sum(torch.exp(self.scales * self.scaling_modifier), axis=1)
+        return torch.sqrt(torch.sum(torch.pow(torch.exp(self.scales * self.scaling_modifier), 2), axis=1))
 
 
 

@@ -2,8 +2,9 @@
 ### Credit: https://github.com/hbb1/torch-splatting ###
 
 import torch
+import copy 
 
-from math import tan, floor
+from math import tan, floor, ceil
 
 # Constant values for calculating spherical harmonics
 C0 = 0.28209479177387814
@@ -224,7 +225,7 @@ class GaussRenderer():
         """
         return self.gaussian_max_contribution > 0
 
-    def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, tile_size=15):
+    def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, max_tile_size=60, max_gaussians_per_tile=60000):
         """
         Renders an image given a set of gaussians and camera transform
 
@@ -246,96 +247,117 @@ class GaussRenderer():
             rect = get_rect(means2D, radii, width=camera.image_width, height=camera.image_height)
             
             render_colour = torch.ones(*self.pix_coord.shape[:2], 3).to(self.device)
-            #self.render_depth = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
-            #self.render_alpha = torch.zeros(*self.pix_coord.shape[:2], 1).to(self.device)
 
-            # Loop through pixels in each tile
-            for w in range(0, camera.image_width, tile_size):
-                for h in range(0, camera.image_height, tile_size):
-                    height_tile_size = min(tile_size, camera.image_height-h)
-                    width_tile_size = min(tile_size, camera.image_width-w)
+            # Stores a list of tiles that need to be processed
+            tile_queue = [[[0,0], [camera.image_width, camera.image_height]]]
+
+            # Loop until the tile queue is empty
+            while tile_queue != []:
+                current_tile = tile_queue.pop(0)
+
+                # Get the corner pixel of the current tile and the size
+                start_px = current_tile[0]
+                tile_size = current_tile[1]
+
+                # If the tile size is less than 2 in any dimension then it is erroneous
+                if tile_size[0] <= 1 or tile_size[1] <= 1:
+                    continue 
+
+                tile_size[0] = min(tile_size[0], camera.image_width-start_px[1])
+                tile_size[1] = min(tile_size[1], camera.image_height-start_px[0])
+
+                # Calculate if Gaussian is in tile
+                over_tl = (rect[0][..., 0].clip(min=start_px[1]), rect[0][..., 1].clip(min=start_px[0]))
+                over_br = (rect[1][..., 0].clip(max=start_px[1]+tile_size[0]-1), rect[1][..., 1].clip(max=start_px[0]+tile_size[1]-1))
+                tile_mask = (over_br[0] > over_tl[0]) & (over_br[1] > over_tl[1]) 
+
+                # If there are no gaussians in the tile then set as the background colour
+                if tile_mask.sum() <= 0:
+                    render_colour[start_px[0]: start_px[0]+tile_size[1], start_px[1]: start_px[1]+tile_size[0], :] = 0 if not self.white_bkgd else 1
+                    continue
+
+                # If the current tile is larger than the max tile size, or has more gaussians than the maximum per tile, 
+                # then divide into four seperate tiles and add to queue
+                if tile_mask.sum() > max_gaussians_per_tile or tile_size[0] > max_tile_size or tile_size[1] > max_tile_size:
+
+                    tile_size[0] = ceil(tile_size[0]/2)
+                    tile_size[1] = ceil(tile_size[1]/2)
+                    tile_queue.append([copy.deepcopy(start_px), copy.deepcopy(tile_size)])
+
+                    start_px[0] += floor(tile_size[1])
+                    tile_queue.append([copy.deepcopy(start_px), copy.deepcopy(tile_size)])
                     
-                    # Calculate if Gaussian is in tile
-                    over_tl = (rect[0][..., 0].clip(min=w), rect[0][..., 1].clip(min=h))
-                    over_br = (rect[1][..., 0].clip(max=w+width_tile_size-1), rect[1][..., 1].clip(max=h+height_tile_size-1))
-                    tile_mask = (over_br[0] > over_tl[0]) & (over_br[1] > over_tl[1]) # 3D gaussian in the tile 
-
-                    if not tile_mask.sum() > 0:
-                        continue
-
-                    P = tile_mask.sum()
-
-                    tile_coord = self.pix_coord[h:h+height_tile_size, w:w+width_tile_size].flatten(0,-2)
+                    start_px[0] -= floor(tile_size[1])
+                    start_px[1] += floor(tile_size[0])
+                    tile_queue.append([copy.deepcopy(start_px), copy.deepcopy(tile_size)])
                     
-                    # Order gaussians based on the depth (descending away from cam)
-                    sorted_depths, index = torch.sort(depths[tile_mask]) 
+                    start_px[0] += floor(tile_size[1])
+                    tile_queue.append([copy.deepcopy(start_px), copy.deepcopy(tile_size)])
 
-                    index = torch.flip(index, [0,])
+                    continue
 
-                    inverse_index = index.argsort(0)
+                tile_coord = self.pix_coord[start_px[0]: start_px[0]+tile_size[1], start_px[1]: start_px[1]+tile_size[0]].flatten(0,-2)
+                        
+                # Order gaussians based on the depth (descending away from cam)
+                sorted_depths, index = torch.sort(depths[tile_mask]) 
 
-                    # Filter gaussians to only those in mask and reorder
-                    sorted_means2D = means2D[tile_mask][index]
-                    sorted_cov2d = cov2d[tile_mask][index] 
-                    sorted_conic = sorted_cov2d.inverse() 
-                    sorted_opacity = opacity[tile_mask][index]
-                    sorted_colour = colour[tile_mask][index]
+                index = torch.flip(index, [0,])
 
-                    dx = (tile_coord[:,None,:] - sorted_means2D[None,:]) 
+                inverse_index = index.argsort(0)
 
-                    # Calculate contributions of each gaussian
-                    gauss_weight = torch.exp(-0.5 * (
-                        dx[:, :, 0]**2 * sorted_conic[:, 0, 0] 
-                        + dx[:, :, 1]**2 * sorted_conic[:, 1, 1]
-                        + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 0, 1]
-                        + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 1, 0]))
+                # Filter gaussians to only those in mask and reorder
+                sorted_means2D = means2D[tile_mask][index]
+                sorted_cov2d = cov2d[tile_mask][index] 
+                sorted_conic = sorted_cov2d.inverse() 
+                sorted_opacity = opacity[tile_mask][index]
+                sorted_colour = colour[tile_mask][index]
 
-                    # Calculate alpha and transmittance of each gaussian in pixel
-                    alpha = (gauss_weight[..., None] * sorted_opacity[None]).clip(max=0.99) 
-                    T = torch.cat([torch.ones_like(alpha[:,:1]), 1-alpha[:,:-1]], dim=1).cumprod(dim=1)
+                dx = (tile_coord[:,None,:] - sorted_means2D[None,:]) 
 
-                    acc_alpha = (alpha * T).sum(dim=1)
+                # Calculate contributions of each gaussian
+                gauss_weight = torch.exp(-0.5 * (
+                    dx[:, :, 0]**2 * sorted_conic[:, 0, 0] 
+                    + dx[:, :, 1]**2 * sorted_conic[:, 1, 1]
+                    + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 0, 1]
+                    + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 1, 0]))
 
-                    # Calculate colour of each pixel in tile
-                    tile_colour = (T * alpha * sorted_colour[None]).sum(dim=1) + (1-acc_alpha) * (1 if self.white_bkgd else 0)
-                    #tile_depth = ((T * alpha) * sorted_depths[None,:,None]).sum(dim=1)
+                # Calculate alpha and transmittance of each gaussian in pixel
+                alpha = (gauss_weight[..., None] * sorted_opacity[None]).clip(max=0.99) 
+                T = torch.cat([torch.ones_like(alpha[:,:1]), 1-alpha[:,:-1]], dim=1).cumprod(dim=1)
+                acc_alpha = (alpha * T).sum(dim=1)
 
-                    render_colour[h:h+height_tile_size, w:w+width_tile_size] = tile_colour.reshape(height_tile_size, width_tile_size, -1)
-                    #self.render_depth[h:h+height_tile_size, w:w+width_tile_size] = tile_depth.reshape(height_tile_size, width_tile_size, -1)
-                    #self.render_alpha[h:h+height_tile_size, w:w+width_tile_size] = acc_alpha.reshape(height_tile_size, width_tile_size, -1)
+                tile_colour = (T * alpha * sorted_colour[None]).sum(dim=1) + (1-acc_alpha) * (1 if self.white_bkgd else 0)
 
-                    # Calculate Representaion of each gaussian in tile and update colours if current rep is largest
+                render_colour[start_px[0]: start_px[0]+tile_size[1], start_px[1]: start_px[1]+tile_size[0]] = tile_colour.reshape(tile_size[1], tile_size[0], -1)
 
-                    # Get the current max representations of each gaussian by applying projection and tile mask
-                    combined_mask = torch.zeros_like(self.gaussian_max_contribution, dtype=torch.bool)
-                    combined_mask[projection_mask] = tile_mask
-                    current_gaussian_reps = self.gaussian_max_contribution[combined_mask]
+                # Get the current max representations of each gaussian by applying projection and tile mask
+                combined_mask = torch.zeros_like(self.gaussian_max_contribution, dtype=torch.bool)
+                combined_mask[projection_mask] = tile_mask
+                current_gaussian_reps = self.gaussian_max_contribution[combined_mask]
 
-                    indices_in_mask = combined_mask.nonzero(as_tuple=True)[0]
+                indices_in_mask = combined_mask.nonzero(as_tuple=True)[0]
 
-                    # Calculate the represntation of each gaussian for the current pixels 
-                    # This is the amount it contributed to the pixel colour and is what is used to determine what colour the points of each gaussian should have!
-                    contribution = ((T * alpha)).squeeze(2)[:, inverse_index]
+                # Calculate the represntation of each gaussian for the current pixels 
+                # This is the amount it contributed to the pixel colour and is what is used to determine what colour the points of each gaussian should have!
+                contribution = ((T * alpha)).squeeze(2)[:, inverse_index]
 
-                    # Get what pixel the gaussian contributed the most and what its biggest contribution value was
-                    biggest_contribution_in_tile = torch.max(contribution, 0)
-                    biggest_contribution_in_tile_vals = biggest_contribution_in_tile[0]
-                    biggest_contribution_in_tile_pixel = biggest_contribution_in_tile[1]
+                # Get what pixel the gaussian contributed the most and what its biggest contribution value was
+                biggest_contribution_in_tile = torch.max(contribution, 0)
+                biggest_contribution_in_tile_vals = biggest_contribution_in_tile[0]
+                biggest_contribution_in_tile_pixel = biggest_contribution_in_tile[1]
 
-                    # Filter gaussians that have a new biggest contribution
-                    new_gaussians = biggest_contribution_in_tile_vals > current_gaussian_reps
+                # Filter gaussians that have a new biggest contribution
+                new_gaussians = biggest_contribution_in_tile_vals > current_gaussian_reps
 
-                    new_gaussian_mask_indices = new_gaussians.nonzero()
+                new_gaussian_mask_indices = new_gaussians.nonzero()
 
-                    gaussians_to_update = indices_in_mask[new_gaussian_mask_indices]
+                gaussians_to_update = indices_in_mask[new_gaussian_mask_indices]
 
-                    # Update the colours and maximum contributions
-                    self.gaussian_max_contribution[gaussians_to_update] = biggest_contribution_in_tile_vals[new_gaussians].unsqueeze(1)
-                    self.gaussian_colours[gaussians_to_update] = tile_colour[biggest_contribution_in_tile_pixel[new_gaussians]].unsqueeze(1)
+                # Update the colours and maximum contributions
+                self.gaussian_max_contribution[gaussians_to_update] = biggest_contribution_in_tile_vals[new_gaussians].unsqueeze(1)
+                self.gaussian_colours[gaussians_to_update] = tile_colour[biggest_contribution_in_tile_pixel[new_gaussians]].unsqueeze(1)
 
-            render_colour =  torch.flip(render_colour, [1,])
-
-            return render_colour
+            return torch.flip(render_colour, [1,])
 
     def add_img(self, camera, **kwargs):
         """
@@ -372,17 +394,17 @@ class GaussRenderer():
             mean_coord_y = ((mean_ndc[..., 1] + 1) * camera.image_height - 1.0) * 0.5
             means2D = torch.stack([mean_coord_x, mean_coord_y], dim=-1)
 
-            # Estimate optimal tile size for fast image rendering while also not running out of memory
-            free_memory_factor = torch.cuda.mem_get_info()[1]/(10**10)
-            recommended_gaussians_per_tile = (450**2 * free_memory_factor)
-            avg_gaussians_per_pixel = means2D.shape[0]/(camera.image_width)
-            tile_size =  max(min(int(recommended_gaussians_per_tile/avg_gaussians_per_pixel), 40), 15) 
+            # Estimate of the maximum gaussians for each tile for the provided amount of memory
+            estimated_mem_per_gaussian = 175000
+            max_gaussians_per_tile = int((torch.cuda.mem_get_info()[1] - torch.cuda.memory_allocated(self.device))/estimated_mem_per_gaussian)
+
+            # Estimate of the max tile size for the provided amount of memory
+            max_tile_size = max_gaussians_per_tile//1000
 
             # Attempts to render image with set tile size (for speed). If this fails then the tile size is reduced
-            while tile_size >= 5:
+            while max_tile_size >= 5 and max_gaussians_per_tile > 5000:
                 try:
-                    # Render new image
-                    rets = self.render(
+                    return self.render(
                         camera=camera, 
                         means2D=means2D,
                         cov2d=cov2d,
@@ -390,12 +412,13 @@ class GaussRenderer():
                         opacity=opacity, 
                         depths=depths,
                         projection_mask=in_mask,
-                        tile_size=tile_size
+                        max_tile_size=max_tile_size,
+                        max_gaussians_per_tile=max_gaussians_per_tile
                     )
-                    return rets
 
                 except Exception:
-                    tile_size -= 5
+                    max_gaussians_per_tile -= 5000
+                    max_tile_size -= 5
 
             raise Exception("Failed to render image")
 

@@ -55,12 +55,18 @@ def distribute_points(gaussian_sizes, num_points):
     """
     Calculates the number of points per gaussian based on the total gaussian sizes
     """
+
     total_sum = torch.sum(gaussian_sizes)
 
     points_ratio = num_points/total_sum
 
     # Distributes points per gaussian and rounds
     points_per_gaussian = torch.round(gaussian_sizes * points_ratio)
+    
+    # Increase the number of points to generate to match the given number of points by setting gaussians with 0 points to 1 
+    zero_indices = (points_per_gaussian == 0).nonzero()
+    zero_indices = zero_indices[:int(min((num_points-points_per_gaussian.sum()).item(), points_per_gaussian[points_per_gaussian == 0].shape[0]))]
+    points_per_gaussian[zero_indices] = 1
 
     return points_per_gaussian
 
@@ -147,7 +153,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
 
     # Loop until all required points have been sampled or the maximium number of attempts has been exceeded
     while new_points.shape[0] < total_required_points and i < num_attempts:
-        
+
         # Get gaussians which do not curretly have the maximum number of points to be sampled from
         gaussians_to_add = added_points != num_points_to_sample  
         new_means_for_point = means[gaussians_to_add]
@@ -183,6 +189,10 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
         for element in zeroed_indxs:
             counts = torch.cat((counts[:element], torch.tensor([0], device=device), counts[element:]))
 
+        # Occasionally counts will return larger than the size of gaussians to add
+        # for a large number of generated points (assuming overflow error)
+        counts = counts[:gaussians_to_add_idxs.shape[0]] 
+
         # Get the difference between the number of points to add (max number of points per gaussian - number of valid points that have been generated)
         # And the number that have been generated. This is the number of points that will be added 
         diffs = torch.min(max_count[gaussians_to_add_idxs]-added_points[gaussians_to_add_idxs], counts).type(torch.int)
@@ -204,7 +214,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
         current_points[:] = sampled_points[filtered_indices]
         current_colours[:] = new_colours_for_point.repeat_interleave(diffs, dim=0)
 
-        # Update added points with the new count (and ensure it is not bigger than the )
+        # Update added points with the new count (and ensure it is not bigger than the number of points to sample)
         added_points[gaussians_to_add_idxs] += counts
         added_points = torch.where(added_points > num_points_to_sample, num_points_to_sample, added_points).type(torch.int)
 
@@ -286,9 +296,7 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
                 camera = Camera(img_width, img_height, focal_x, focal_y, transform)
 
                 # Render a new image
-                #start_time = time.time()
                 render = gaussian_renderer.add_img(camera).detach().cpu().numpy()
-                #print(f"time: {time.time() - start_time}")
 
                 #imwrite(f"results\\{i}.png", render)
 
@@ -320,10 +328,10 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
 
     point_distribution = torch.unique(points_per_gaussian)
 
+    # Bin gaussians together (makes the generation process much faster)
     if not pointcloud_settings.exact_num_points:
         start_bin, bin_size = calculate_bin_sizes(points_per_gaussian)
 
-        # Bin gaussians together (makes the generation process faster)
         point_distribution = torch.cat((point_distribution[:start_bin],  torch.mul(torch.unique(torch.ceil(point_distribution[start_bin:]/ bin_size)), bin_size)), 0)
 
     total_points = torch.tensor([], device=pointcloud_settings.device)
@@ -334,11 +342,15 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
     num_sample_attempts = 5 if not pointcloud_settings.exact_num_points else 100
 
     # Iterate through different number of points 
-    for i in tqdm(range(point_distribution.shape[0]-1), position=0, leave=True):
+    for i in tqdm(range(point_distribution.shape[0]), position=0, leave=True):
 
         start_range = point_distribution[i]
-        end_range = point_distribution[i+1]
-        
+
+        if i != point_distribution.shape[0]-1:
+            end_range = point_distribution[i+1]
+        else:
+            end_range = start_range+1
+
         # Get gaussians with assigned number of points between the start and end
         gaussian_indices = torch.where((points_per_gaussian >= start_range) & (points_per_gaussian < end_range))[0]
 
@@ -449,6 +461,7 @@ def config_parser():
 def main():
     args = config_parser()
 
+    # All config info required for generating the point cloud
     pointcloud_settings = GaussPointCloudSettings(
         num_points=args.num_points,
         std_distance=args.std_distance,
