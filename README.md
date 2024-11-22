@@ -54,6 +54,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | colour_quality       |    medium      |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high and ultra |
 | bounding_box_min     |    -           |  Values for minimum position of gaussians to include in generating the new point cloud  |
 | bounding_box_max     |    -           |  Values for maximum position of gaussians to include in generating the new point cloud  |
+| no_calculate_normals |    False       |  Set to not calculate and save normals for the points |  
 | std_distance         |    2.0         |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
 | min_opacity          |    0.0         |  Minimum opacity for gaussians that will be included (must be between 0-1) |
 | cull_gaussian_sizes  |    0.0         |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
@@ -67,7 +68,7 @@ While the generated point clouds have a high accuracy and precise colours, the p
 
 ## How this works
 
-Firstly, the gaussians are loaded from the input file, with the 3D covariance matrices being calculated using the scales and rotations of each gaussian. The original gaussian colours are calculated from the spherical harmonics (with the degree=0 since these points do not change based on direction when they are part of the point cloud). Gaussians are then culled based on the bounding box, size cut off and minimum capacity arguments.
+Firstly, the gaussians are loaded from the input file, with the 3D covariance matrices being calculated using the scales and rotations of each gaussian. The original gaussian colours are calculated from the spherical harmonics (with the degree=0 since these points do not change based on direction when they are part of the point cloud). Gaussians are then culled based on the bounding box, size cut off and minimum capacity arguments. Alongside this, the normals of each Gaussians are calculated by taking the smallest axis of the Gaussian; this facilitates meshing of the point cloud later.
 
 There is an issue with using the loaded gaussian colours for generating new points; these colours do not accurately represent the scene. When rendering an image, gaussians that overlap on each pixel each contribute to the final colour of that pixel based on their opacity and order. Hence, a gaussian that is always behind another gaussian may only contribute 10% to the final pixel colour, and thus their colour does not accurately represent the contribution to the scene.
 
