@@ -73,6 +73,7 @@ class Gaussians():
         self.rots = rots
         self.opacities = opacities
         self.colours = colours
+        self.normals = None
 
         self.scaling_modifier = 1.0
 
@@ -81,6 +82,21 @@ class Gaussians():
 
         # Validate and add covariances matrices
         self.validate_and_add_covariances(covariances)
+
+    def calculate_normals(self):
+        # Choose the smallest side of the Gaussian for the normal 
+        min_values = torch.min(self.scales, 1)
+
+        # Create normal matrix
+        normal_matrices = torch.zeros(self.xyz.shape, dtype=torch.float, device=self.xyz.get_device())
+        normal_matrices[torch.arange(self.xyz.shape[0]), min_values[1]] = 1
+        
+        # Rotate normal by the rotation matrix
+        R = build_rotation(self.rots)
+        normal_matrices = normal_matrices.unsqueeze(1)
+        normals = torch.bmm(R,  normal_matrices.permute(0, 2, 1))
+
+        self.normals = normals.permute(0, 2, 1).squeeze(1)
 
     def non_posdef_covariances(self, covariances):
         """
@@ -148,6 +164,9 @@ class Gaussians():
         self.colours = self.colours[filter_indices]
         self.opacities = self.opacities[filter_indices]
         self.covariances = self.covariances[filter_indices]
+        
+        if self.normals is not None:
+            self.normals = self.normals[filter_indices]
 
     def apply_min_opacity(self, min_opacity):
         """

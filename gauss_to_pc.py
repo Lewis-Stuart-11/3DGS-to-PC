@@ -44,6 +44,7 @@ class GaussPointCloudSettings(NamedTuple):
     min_opacity: float
     bounding_box_min: list
     bounding_box_max: list
+    calculate_normals: bool
     cull_large_percentage: float
     remove_unrendered_gaussians: bool
     colour_resolution: int
@@ -95,7 +96,7 @@ def calculate_bin_sizes(points_per_gaussian):
     # Second derivative of the number of points per gaussian 
     gradients = np.absolute(np.gradient(np.gradient(distribution.cpu().detach().numpy())))
 
-    bin_size = max(len(distribution)//100, 2)
+    bin_size = max(len(distribution)//100, 1)
 
     length = len(gradients) - len(gradients) % bin_size
     gradients = gradients[:length]
@@ -118,7 +119,7 @@ def calculate_bin_sizes(points_per_gaussian):
 
     return start_bin, bin_size
 
-def create_new_gaussian_points(num_points_to_sample, means, covariances, colours, std_distance=2, num_attempts=5, device="cuda:0"):
+def create_new_gaussian_points(num_points_to_sample, means, covariances, colours, std_distance=2, num_attempts=5, normals=None, device="cuda:0"):
     """
     Generates new points for each of the provided gaussians
 
@@ -148,6 +149,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
         
     new_points = torch.tensor([], device=device)
     new_colours = torch.tensor([], device=device).type(torch.double)
+    new_normals =  torch.tensor([], device=device).type(torch.double) if normals is not None else None
 
     i = 0
 
@@ -159,6 +161,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
         new_means_for_point = means[gaussians_to_add]
         new_covariances_for_point = covariances[gaussians_to_add]
         new_colours_for_point = colours[gaussians_to_add]
+        new_normals_for_point = normals[gaussians_to_add] if normals is not None else None
 
         gaussians_to_add_idxs = gaussians_to_add.nonzero().squeeze(1)
 
@@ -199,16 +202,16 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
 
         total_current_points = int(diffs.sum().item())
 
-        # Empty tensors that will be added to
-        current_points = torch.empty((total_current_points, sampled_points.size(1)), dtype=sampled_points.dtype, device=device)
-        current_colours = torch.empty((total_current_points, new_colours_for_point.size(1)), dtype=new_colours_for_point.dtype, device=device)
-
         # Filter points so that only the exact amount of required points (diffs) are added for each gaussian
         indices = torch.arange(len(diffs), device=device) * num_points_to_sample
         expanded_indices = indices.unsqueeze(1) + torch.arange(num_points_to_sample, device=device)
         expanded_indices = expanded_indices.flatten()
         mask = (torch.arange(num_points_to_sample, device=device).unsqueeze(0) < diffs.unsqueeze(1)).flatten()
         filtered_indices = expanded_indices[mask]
+
+        # Empty tensors that will be added to
+        current_points = torch.empty((total_current_points, sampled_points.size(1)), dtype=sampled_points.dtype, device=device)
+        current_colours = torch.empty((total_current_points, new_colours_for_point.size(1)), dtype=new_colours_for_point.dtype, device=device)
 
         # Add new sampled points 
         current_points[:] = sampled_points[filtered_indices]
@@ -221,9 +224,14 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
         new_points = torch.cat((new_points, current_points), 0)
         new_colours = torch.cat((new_colours, current_colours), 0)
 
+        if normals is not None:
+            current_normals = torch.empty((total_current_points, new_normals_for_point.size(1)), dtype=new_normals_for_point.dtype, device=device)
+            current_normals[:] = new_normals_for_point.repeat_interleave(diffs, dim=0) 
+            new_normals = torch.cat((new_normals, current_normals), 0)
+
         i += 1
 
-    return new_points, new_colours
+    return new_points, new_colours, new_normals
 
 def imwrite(path, image):
     """
@@ -248,16 +256,23 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
     # Transform path has been provided, so use those camera positions and intrinsics 
     if transform_path is not None:
         print("Loading Camera Poses")
+        print()
 
         transforms, intrinsics = load_transform_data(transform_path, skip_rate=pointcloud_settings.camera_skip_rate)
 
     print("Loading Gaussians from File")
+    print()
     
     # Load gaussian data from file
     xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
 
-    # Format gaussians
     gaussians = Gaussians(xyz, scales, rots, colours, opacities)
+
+    # Calculate Gaussian Normals
+    if pointcloud_settings.calculate_normals:
+        gaussians.calculate_normals()
+
+    # Format gaussians
     gaussians.apply_min_opacity(pointcloud_settings.min_opacity)
     gaussians.apply_bounding_box(pointcloud_settings.bounding_box_min, pointcloud_settings.bounding_box_max)
     gaussians.cull_large_gaussians(pointcloud_settings.cull_large_percentage)
@@ -336,6 +351,7 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
 
     total_points = torch.tensor([], device=pointcloud_settings.device)
     total_colours = torch.tensor([], device=pointcloud_settings.device).type(torch.double)
+    total_normals = torch.tensor([], device=pointcloud_settings.device).type(torch.double) if pointcloud_settings.calculate_normals else None 
 
     print(f"Starting Point Cloud Generation")
 
@@ -367,21 +383,28 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
         covariances_for_point = gaussians.covariances[gaussian_indices]
         mean_for_point = gaussians.xyz[gaussian_indices]
         centre_colours = gaussians.colours[gaussian_indices]
+        normals_for_point = gaussians.normals[gaussian_indices] if pointcloud_settings.calculate_normals else None
         
         # First point to use is the centre of the gaussian 
         total_points = torch.cat((total_points, mean_for_point), 0)
         total_colours = torch.cat((total_colours, centre_colours), 0)
+        if pointcloud_settings.calculate_normals:
+            total_normals = torch.cat((total_normals, normals_for_point), 0)
 
         if num_points_for_gaussian <= 1: 
             continue
 
         # Sample the rest of the required points
-        new_points, new_colours = create_new_gaussian_points(num_points_for_gaussian-1, mean_for_point, covariances_for_point,
+        new_points, new_colours, new_normals = create_new_gaussian_points(num_points_for_gaussian-1, mean_for_point, covariances_for_point,
                                                              centre_colours, std_distance=pointcloud_settings.std_distance, 
-                                                             num_attempts=num_sample_attempts, device=pointcloud_settings.device)
+                                                             num_attempts=num_sample_attempts, normals=normals_for_point, 
+                                                             device=pointcloud_settings.device)
 
         total_points = torch.cat((total_points, new_points), 0)
         total_colours = torch.cat((total_colours, new_colours), 0)
+ 
+        if pointcloud_settings.calculate_normals:
+            total_normals = torch.cat((total_normals, new_normals), 0)
 
     print()
 
@@ -389,7 +412,7 @@ def generate_pointcloud(input_path, transform_path, pointcloud_settings):
     torch.cuda.empty_cache()  
     gc.collect()  
 
-    return total_points, total_colours
+    return total_points, total_colours, total_normals
 
 def config_parser():
 
@@ -411,6 +434,8 @@ def config_parser():
     parser.add_argument("--exact_num_points", action="store_true", help="Set if the number of generated points should more closely match the num_points argument (slower)")
 
     parser.add_argument("--std_distance", type=float, default=2.0, help="Maximum distance each point can be from the centre of their gaussian")
+
+    parser.add_argument("--no_calculate_normals",  action="store_true", help="Set to not calculate normals for the points")
 
     parser.add_argument("--min_opacity", type=float, default=0.0, help="Minimum opacity for gaussians to be included (must be between 0-1)")
 
@@ -469,7 +494,8 @@ def main():
         render_colours=not args.no_render_colours,
         min_opacity=args.min_opacity,
         bounding_box_min=args.bounding_box_min, 
-        bounding_box_max=args.bounding_box_max, 
+        bounding_box_max=args.bounding_box_max,
+        calculate_normals=not args.no_calculate_normals,
         cull_large_percentage=args.cull_gaussian_sizes, 
         colour_resolution=int(COLOR_QUALITY_OPTIONS[args.colour_quality.lower()]),
         max_sh_degree=args.max_sh_degree, 
@@ -479,12 +505,12 @@ def main():
     )
 
     # Get point cloud 
-    total_points, total_colours = generate_pointcloud(args.input_path, args.transform_path, pointcloud_settings)
+    total_points, total_colours, total_normals = generate_pointcloud(args.input_path, args.transform_path, pointcloud_settings)
 
-    print("Saving final Point Cloud")
+    print("Saving Final Point Cloud")
 
     # Save point cloud
-    save_xyz_to_ply(total_points, args.output_path, rgb_colors=total_colours, chunk_size=10**6)
+    save_xyz_to_ply(total_points, args.output_path, rgb_colors=total_colours, normals_points=total_normals, chunk_size=10**6)
 
 if __name__ == "__main__":
     main()

@@ -97,7 +97,7 @@ def load_splat_data(path):
     return xyz_tensor, scales_tensor, rots_tensor, colours_tensor, opacities
 
     
-def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, chunk_size=10**6):
+def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, normals_points=None, chunk_size=10**6):
     """
     Save a series of XYZ points to a PLY file.
 
@@ -119,8 +119,25 @@ def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, chunk_size=10**6):
     num_chunks = (total_points + chunk_size - 1) // chunk_size
 
     with open(filename, 'wb') as ply_file:
-        # Write PLY header
-        header = f"""ply
+    
+        if normals_points is not None:
+            header = f"""ply
+format binary_little_endian 1.0
+element vertex {total_points}
+property float x
+property float y
+property float z
+property float nx
+property float ny
+property float nz
+property uchar red
+property uchar green
+property uchar blue
+end_header
+"""
+        else:
+            # Write PLY header
+            header = f"""ply
 format binary_little_endian 1.0
 element vertex {total_points}
 property float x
@@ -130,7 +147,8 @@ property uchar red
 property uchar green
 property uchar blue
 end_header
-"""
+""" 
+
         ply_file.write(header.encode('utf-8'))
 
         for i in tqdm(range(num_chunks), position=0, leave=True):
@@ -140,8 +158,20 @@ end_header
             points_chunk = xyz_points[start_idx:end_idx].cpu().detach().numpy()
             colors_chunk = rgb_colors[start_idx:end_idx].cpu().detach().numpy().astype(np.uint8)
 
-            # Create a structured array directly
-            vertex = np.zeros(points_chunk.shape[0], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
+            if normals_points is not None:
+                normals_chunk = normals_points[start_idx:end_idx].cpu().detach().numpy()
+
+                # Create a structured array directly
+                vertex = np.zeros(points_chunk.shape[0], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
+                                                        ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
+                                                        ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+
+                vertex['nx'] = normals_chunk[:, 0]
+                vertex['ny'] = normals_chunk[:, 1]
+                vertex['nz'] = normals_chunk[:, 2]
+            else:
+                # Create a structured array directly
+                vertex = np.zeros(points_chunk.shape[0], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), 
                                                         ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
 
             vertex['x'] = points_chunk[:, 0]
