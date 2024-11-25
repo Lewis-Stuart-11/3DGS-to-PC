@@ -225,6 +225,9 @@ class GaussRenderer():
         """
         return self.gaussian_max_contribution > 0
 
+    def get_surface_gaussians(self):
+        return self.gaussian_max_contribution > 0.4
+
     def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, max_tile_size=60, max_gaussians_per_tile=60000):
         """
         Renders an image given a set of gaussians and camera transform
