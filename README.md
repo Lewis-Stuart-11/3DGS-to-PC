@@ -1,4 +1,4 @@
-# 3D Gaussian Splatting to Point Cloud 
+# 3D Gaussian Splatting to Point Cloud (or Basic Mesh)
 
 Gaussian Splatting can generate extremely high quality 3D representations of a scene. However, to properly view this reconstruction, specialised gaussian renders are required. Furthermore, a lot of 3D handling software are not compatible with 3D gaussians... but most are compatible with point clouds. 
 
@@ -46,7 +46,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | transform_path       | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
 | generate_mesh        | False        |  Set to also generate a mesh based on the created point cloud  |
 | poisson_depth        | 12           |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
-| mesh_output_path     | 3dgs_mesh.ply|
+| mesh_output_path     | 3dgs_mesh.ply|  Path to mesh output file (must be ply file) |
 | camera_skip_rate     | 0            |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
 | num_points           | 10000000     |  Total number of points to generate for the pointcloud |
 | exact_num_points     | False        |  Set if the number of generated points should more closely match the num_points argument (slower) |
