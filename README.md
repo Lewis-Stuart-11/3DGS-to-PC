@@ -1,9 +1,10 @@
-# 3D Gaussian Splatting to Point Cloud (or Basic Mesh)
+# 3D Gaussian Splatting to Point Cloud (or Mesh)
 
 Gaussian Splatting can generate extremely high quality 3D representations of a scene. However, to properly view this reconstruction, specialised gaussian renders are required. Furthermore, a lot of 3D handling software are not compatible with 3D gaussians... but most are compatible with point clouds. 
 
 This repo offers scripts for converting a 3D Gaussian Splatting scene into a dense point cloud. The generated point clouds are high-quality and effectively imitate the original 3DGS scenes. Extra functionality is offered to customise the creation of the point cloud, as well as producing a mesh of the scene.
 
+**Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
 **Showcase:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
 
 <p>
