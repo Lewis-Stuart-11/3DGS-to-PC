@@ -430,6 +430,8 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         del gaussian_renderer
     
     else:
+        gaussians.colours *= 255
+
         print("Skipping Rendering Gaussian Colours")
     
     print()
