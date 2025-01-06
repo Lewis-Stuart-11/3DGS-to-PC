@@ -1,19 +1,18 @@
-# 3D Gaussian Splatting to Point Cloud (or Basic Mesh)
+# 3D Gaussian Splatting to Point Cloud (or Mesh)
 
 Gaussian Splatting can generate extremely high quality 3D representations of a scene. However, to properly view this reconstruction, specialised gaussian renders are required. Furthermore, a lot of 3D handling software are not compatible with 3D gaussians... but most are compatible with point clouds. 
 
 This repo offers scripts for converting a 3D Gaussian Splatting scene into a dense point cloud. The generated point clouds are high-quality and effectively imitate the original 3DGS scenes. Extra functionality is offered to customise the creation of the point cloud, as well as producing a mesh of the scene.
 
-**Showcase:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
+1) **Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
+2) **Youtube Video:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
 
 <p>
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="350" />
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdsM3k2Z3JlZ296eDZpOWlwNHc0cjZpZHA1djdoeDU3c3h0a2ZveSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z9Cd1ENioEBGHxXcbs/giphy-downsized-large.gif" width="350" /> 
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcndwdG9yaGNydmg2cW1ybTQwb2Nnb2luOGswcml2bGc4NGNqY3FwaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9M8l0Vv7YJnTFC8evQ/giphy-downsized-large.gif" width="350" />
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjdhc21tNnJ6OTVibDlqOHB6MzR0dDZ3bmRyczNqN2lpNDM3a2JtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1C4h9ZvYNryH5Zu1oZ/giphy-downsized-large.gif" width="350" /> 
 </p>
 
-Credit [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) and [Torch Splatting](https://github.com/hbb1/torch-splatting/tree/main), which were both used as part of this codebase
+Credit [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) and [Torch Splatting](https://github.com/hbb1/torch-splatting/tree/main), which were both used as part of this codebase.
 
 ## How to run
 
