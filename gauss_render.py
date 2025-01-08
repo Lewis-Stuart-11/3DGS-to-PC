@@ -194,7 +194,7 @@ def get_rect(pix_coord, radii, width, height):
 
 class GaussRenderer():
     """
-    A gaussian splatting renderer
+    A Gaussian splatting renderer
     """
 
     def __init__(self, means3D, opacity, colour, cov3d, white_bkgd=True):
@@ -202,11 +202,14 @@ class GaussRenderer():
 
         self.device = means3D.get_device()
 
-        # Tensor of the maximum contributions each gaussian made 
+        # Tensor of the maximum contributions each Gaussian made 
         self.gaussian_max_contribution = torch.zeros(means3D.shape[0], device=self.device)
 
-        # Tensor of new gaussian colours calculated for point cloud generation
+        # Tensor of new Gaussian colours calculated for point cloud generation
         self.gaussian_colours = torch.zeros((means3D.shape[0], 3), device=self.device, dtype=torch.double)
+
+        """# Tensor of surface Gaussians
+        self.surface_gaussian_idxs = torch.zeros(means3D.shape[0], device=self.device)"""
 
         self.means3D =  means3D
         self.opacity = opacity 
@@ -215,31 +218,34 @@ class GaussRenderer():
 
     def get_colours(self):
         """ 
-        Returns the new calculated gaussian colours 
+        Returns the new calculated Gaussian colours 
         """
         return self.gaussian_colours * 255
 
     def get_seen_gaussians(self):
         """ 
-        Returns indices of gaussians that have been rendered 
+        Returns indices of Gaussians that have been rendered 
         """
         return self.gaussian_max_contribution > 0
 
     def get_surface_gaussians(self):
-        return self.gaussian_max_contribution > 0.4
+        """
+        Returns indices of Gaussians that are predicted to be on the surface of the scene
+        """
+        return self.gaussian_max_contribution > torch.mean(self.gaussian_max_contribution)
 
     def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, max_tile_size=60, max_gaussians_per_tile=60000):
         """
-        Renders an image given a set of gaussians and camera transform
+        Renders an image given a set of Gaussians and camera transform
 
         Args:
             camera: the camera parameters to render the image
-            means2D: positions of the gaussians in 2D spacse
-            cov2D: 2D covariance matrices for gaussians
-            colour: colours of the gaussians
-            opacity: opacity of the gaussians
-            depths: depths of the gaussians
-            projection_mask: mask that filters gaussians not included in camera frame
+            means2D: positions of the Gaussians in 2D spacse
+            cov2D: 2D covariance matrices for Gaussians
+            colour: colours of the Gaussians
+            opacity: opacity of the Gaussians
+            depths: depths of the Gaussians
+            projection_mask: mask that filters Gaussians not included in camera frame
         Returns:
             render_image: the rendered RGB image
         """
@@ -301,14 +307,14 @@ class GaussRenderer():
 
                 tile_coord = self.pix_coord[start_px[0]: start_px[0]+tile_size[1], start_px[1]: start_px[1]+tile_size[0]].flatten(0,-2)
                         
-                # Order gaussians based on the depth (descending away from cam)
+                # Order Gaussians based on the depth (descending away from cam)
                 sorted_depths, index = torch.sort(depths[tile_mask]) 
 
                 index = torch.flip(index, [0,])
 
                 inverse_index = index.argsort(0)
 
-                # Filter gaussians to only those in mask and reorder
+                # Filter Gaussians to only those in mask and reorder
                 sorted_means2D = means2D[tile_mask][index]
                 sorted_cov2d = cov2d[tile_mask][index] 
                 sorted_conic = sorted_cov2d.inverse() 
@@ -317,14 +323,14 @@ class GaussRenderer():
 
                 dx = (tile_coord[:,None,:] - sorted_means2D[None,:]) 
 
-                # Calculate contributions of each gaussian
+                # Calculate contributions of each Gaussian
                 gauss_weight = torch.exp(-0.5 * (
                     dx[:, :, 0]**2 * sorted_conic[:, 0, 0] 
                     + dx[:, :, 1]**2 * sorted_conic[:, 1, 1]
                     + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 0, 1]
                     + dx[:,:,0]*dx[:,:,1] * sorted_conic[:, 1, 0]))
 
-                # Calculate alpha and transmittance of each gaussian in pixel
+                # Calculate alpha and transmittance of each Gaussian in pixel
                 alpha = (gauss_weight[..., None] * sorted_opacity[None]).clip(max=0.99) 
                 T = torch.cat([torch.ones_like(alpha[:,:1]), 1-alpha[:,:-1]], dim=1).cumprod(dim=1)
                 acc_alpha = (alpha * T).sum(dim=1)
@@ -333,23 +339,22 @@ class GaussRenderer():
 
                 render_colour[start_px[0]: start_px[0]+tile_size[1], start_px[1]: start_px[1]+tile_size[0]] = tile_colour.reshape(tile_size[1], tile_size[0], -1)
 
-                # Get the current max representations of each gaussian by applying projection and tile mask
+                # Get the current max representations of each Gaussian by applying projection and tile mask
                 combined_mask = torch.zeros_like(self.gaussian_max_contribution, dtype=torch.bool)
                 combined_mask[projection_mask] = tile_mask
                 current_gaussian_reps = self.gaussian_max_contribution[combined_mask]
 
                 indices_in_mask = combined_mask.nonzero(as_tuple=True)[0]
 
-                # Calculate the represntation of each gaussian for the current pixels 
-                # This is the amount it contributed to the pixel colour and is what is used to determine what colour the points of each gaussian should have!
+                # Calculate the represntation of each Gaussian for the current pixels 
+                # This is the amount it contributed to the pixel colour and is what is used to determine what colour the points of each Gaussian should have!
                 contribution = ((T * alpha)).squeeze(2)[:, inverse_index]
 
-                # Get what pixel the gaussian contributed the most and what its biggest contribution value was
+                # Get what pixel the Gaussian contributed the most and what its biggest contribution value was
                 biggest_contribution_in_tile = torch.max(contribution, 0)
                 biggest_contribution_in_tile_vals = biggest_contribution_in_tile[0]
                 biggest_contribution_in_tile_pixel = biggest_contribution_in_tile[1]
-
-                # Filter gaussians that have a new biggest contribution
+                # Filter Gaussians that have a new biggest contribution
                 new_gaussians = biggest_contribution_in_tile_vals > current_gaussian_reps
 
                 new_gaussian_mask_indices = new_gaussians.nonzero()
@@ -359,6 +364,11 @@ class GaussRenderer():
                 # Update the colours and maximum contributions
                 self.gaussian_max_contribution[gaussians_to_update] = biggest_contribution_in_tile_vals[new_gaussians].unsqueeze(1)
                 self.gaussian_colours[gaussians_to_update] = tile_colour[biggest_contribution_in_tile_pixel[new_gaussians]].unsqueeze(1)
+
+                """# Get the Gaussian that contributed most for each pixel in the tile, and set the surface Gaussian ids to 1 for these Gaussians
+                biggest_contribution_per_pixel = torch.max(contribution, 1)[1]
+                surface_gaussians_to_update = indices_in_mask[biggest_contribution_per_pixel]
+                self.surface_gaussian_idxs[surface_gaussians_to_update] += 1"""
 
             return torch.flip(render_colour, [1,])
 
@@ -381,7 +391,7 @@ class GaussRenderer():
                     focal_x=camera.focal_x, 
                     focal_y=camera.focal_y)
 
-            # Project gaussians into 2D and filter gaussians outside of view range
+            # Project Gaussians into 2D and filter Gaussians outside of view range
             mean_ndc, mean_view, in_mask = projection_ndc(self.means3D, 
                         viewmatrix=camera.world_view_transform, 
                         projmatrix=camera.projection_matrix)
@@ -397,7 +407,7 @@ class GaussRenderer():
             mean_coord_y = ((mean_ndc[..., 1] + 1) * camera.image_height - 1.0) * 0.5
             means2D = torch.stack([mean_coord_x, mean_coord_y], dim=-1)
 
-            # Estimate of the maximum gaussians for each tile for the provided amount of memory
+            # Estimate of the maximum Gaussians for each tile for the provided amount of memory
             estimated_mem_per_gaussian = 175000
             max_gaussians_per_tile = int((torch.cuda.mem_get_info()[1] - torch.cuda.memory_allocated(self.device))/estimated_mem_per_gaussian)
 

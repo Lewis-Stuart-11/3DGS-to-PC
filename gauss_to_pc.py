@@ -424,12 +424,15 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         if pointcloud_settings.remove_unrendered_gaussians:
             gaussians.filter_gaussians(gaussian_renderer.get_seen_gaussians())
 
+        # Get the predicted surface Gaussians
         if pointcloud_settings.generate_mesh:
-            surface_gaussian_idxs = gaussian_renderer.get_surface_gaussians()[gaussian_renderer.get_seen_gaussians()]
+            surface_gaussian_idxs = gaussian_renderer.get_surface_gaussians()[gaussian_renderer.get_seen_gaussians()] 
 
         del gaussian_renderer
     
     else:
+
+        # Convert colours from (0-1) to (0-255)
         gaussians.colours *= 255
 
         print("Skipping Rendering Gaussian Colours")
@@ -460,20 +463,23 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     surface_point_cloud = None
 
     # Generate surface point cloud if meshing the scene
-    if pointcloud_settings.generate_mesh:
+    if pointcloud_settings.generate_mesh and pointcloud_settings.render_colours:
         print("Starting Point Cloud Generation for Surface Gaussians")
-
         print()
 
         # Ensure that only surface gaussians are now included
         gaussians.filter_gaussians(surface_gaussian_idxs)
 
-        avg_points_per_gauss_for_mesh = 40
+        avg_points_per_gauss_for_mesh = 25
+
+        # Set the number of mesh points as the large of the number of surface Gaussians multiplied by the average points per Gaussian
+        # Or half the number of points set by the user 
+        total_mesh_points = min(pointcloud_settings.num_points//2, int(gaussians.xyz.shape[0]*avg_points_per_gauss_for_mesh))
 
         # Generate points for the point cloud of the entire scene
-        points, colours, normals = generate_pointcloud(gaussians, int(gaussians.xyz.shape[0]*avg_points_per_gauss_for_mesh), exact_num_points=pointcloud_settings.exact_num_points, 
-                                                                                                                    num_sample_attempts=num_sample_attempts,
-                                                                                                                    device=pointcloud_settings.device)
+        points, colours, normals = generate_pointcloud(gaussians, total_mesh_points, exact_num_points=pointcloud_settings.exact_num_points, 
+                                                                                     num_sample_attempts=num_sample_attempts,
+                                                                                     device=pointcloud_settings.device)
 
         surface_point_cloud = PointCloudData(
             points = points,
@@ -500,9 +506,11 @@ def config_parser():
     parser.add_argument("--num_points", type=int, default=10000000, help="Total number of points to generate for the pointcloud")
     parser.add_argument("--exact_num_points", action="store_true", help="Set if the number of generated points should more closely match the num_points argument (slower)")
     
-    parser.add_argument("--generate_mesh", action="store_true", help="Set to also generate a mesh based on the created point cloud")
-    parser.add_argument("--poisson_depth", default=12, type=int, help="The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality) ")
+    parser.add_argument("--generate_mesh", action="store_true", help="Set to also generate a mesh based on the created point cloud (requires Open3D)")
+    parser.add_argument("--poisson_depth", default=10, type=int, help="The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality) ")
     parser.add_argument("--mesh_output_path",  type=str, default="3dgs_mesh.ply", help="Path to mesh output file (must be ply file)")
+
+    parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
 
     parser.add_argument("--camera_skip_rate", type=int, default=0, help="Number of cameras to skip for each rendered camera (reduces compute time- only use if cameras in linear trajectory)")
     
@@ -596,8 +604,24 @@ def main():
         device="cuda:0" if torch.cuda.is_available() else "cpu"
     )
 
-    # Get point cloud 
+    # Generate point cloud from 3DGS scene
     total_point_cloud, surface_point_cloud = convert_3dgs_to_pc(args.input_path, args.transform_path, pointcloud_settings)
+    
+    # Clean point cloud if set
+    if args.clean_pointcloud:
+        print("Cleaning Point Cloud")
+
+        from mesh_handler import clean_point_cloud
+
+        # Clean point cloud using Open3D
+        cleaned_points, cleaned_colours, cleaned_normals = clean_point_cloud(total_point_cloud.points, total_point_cloud.colours, 
+                                                                             total_point_cloud.normals, device=pointcloud_settings.device)
+
+        total_point_cloud = PointCloudData(
+            points = cleaned_points,
+            colours = cleaned_colours,
+            normals = cleaned_normals
+        )
 
     print("Saving Final Point Cloud")
 
@@ -610,11 +634,13 @@ def main():
 
     print()
 
+    # Generate mesh from surface point cloud
     if pointcloud_settings.generate_mesh:
         print("Generating Mesh")
 
         from mesh_handler import generate_mesh
 
+        # Generate and save mesh using Open3D
         generate_mesh(surface_point_cloud.points, surface_point_cloud.colours, surface_point_cloud.normals, args.mesh_output_path, depth=args.poisson_depth)
 
     print()

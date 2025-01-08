@@ -63,7 +63,8 @@ def get_colmap_bin_intrinsics(file_path):
             camera_id = elems[0]
             
             if elems[1] != 1:
-                raise AttributeError("Colmap cameras bin must be Pinhole camera type")
+                print("WARNING: Colmap cameras are a not Pinhole camera type. Rendered Colour quality might be impacted!")
+                #raise AttributeError("Colmap cameras bin must be Pinhole camera type")
 
             camera_intrinsics[camera_id] = elems[2:]
 
@@ -87,7 +88,8 @@ def get_colmap_txt_intrinsics(file_path):
             camera_id = int(elems[0])
             
             if elems[1].lower().strip() != "pinhole":
-                raise AttributeError("Colmap cameras txt must be Pinhole camera type")
+                print("WARNING: Colmap cameras are not a Pinhole camera type. Rendered Colour quality might be impacted!")
+                #raise AttributeError("Colmap cameras txt must be Pinhole camera type")
 
             camera_intrinsics[camera_id] = elems[2:]
 

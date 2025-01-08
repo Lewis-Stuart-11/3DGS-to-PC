@@ -4,7 +4,8 @@ Gaussian Splatting can generate extremely high quality 3D representations of a s
 
 This repo offers scripts for converting a 3D Gaussian Splatting scene into a dense point cloud. The generated point clouds are high-quality and effectively imitate the original 3DGS scenes. Extra functionality is offered to customise the creation of the point cloud, as well as producing a mesh of the scene.
 
-1) **Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
+1) **Research Paper:** *TO ADD*
+2) **Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
 2) **Youtube Video:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
 
 <p>
@@ -44,8 +45,9 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | output_path          | 3dgs_pc.ply  |  Path to output file (must be ply file) |
 | transform_path       | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
 | generate_mesh        | False        |  Set to also generate a mesh based on the created point cloud  |
-| poisson_depth        | 12           |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
+| poisson_depth        | 10           |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
 | mesh_output_path     | 3dgs_mesh.ply|  Path to mesh output file (must be ply file) |
+| clean_pointcloud     | False        |  Set to remove outliers on the point cloud after generation (requires Open3D) |
 | camera_skip_rate     | 0            |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
 | num_points           | 10000000     |  Total number of points to generate for the pointcloud |
 | exact_num_points     | False        |  Set if the number of generated points should more closely match the num_points argument (slower) |
@@ -72,8 +74,9 @@ Our mesh reconstruction works by generating a point cloud only containing the pr
 ![Comparison of the generated point cloud and mesh for the bulldozer scene](https://i.imgur.com/Lzwhatr.png)
 
 Some tips to improve the results:
-1) Set a bounding box to only mesh specific parts of the scene that are you need in the mesh
-2) If the final mesh is too sharp, we recommend using some of the features in CloudCompare (e.g. smoothing) to get the desired output.
+1) Set the ```poisson_depth``` argument to a higher value (we found that 12 produced the best results, but any higher produced a infeasible mesh)
+2) Set a bounding box to only mesh specific parts of the scene that are you need in the mesh
+3) If the final mesh is too sharp, we recommend using some of the features in CloudCompare (e.g. smoothing) to get the desired output.
 
 ## How to increase speed
 
@@ -81,28 +84,9 @@ While the generated point clouds have a high accuracy and precise colours, the p
 1) Set camera_skip_rate to a value where overlapping images are not rendered (e.g. we set camera_skip_rate = 4 for the mip dataset). We found that setting this value significantly reduced compile time, while not directly impacting the quality of the final reconstruction. Only do this if the camera poses are ordered in a linear trajectory around your scene and the camera poses overlap considerably.
 2) Set colour_quality to a lower option. This value is used to determine what resolution to render images of the scene; a lower quality will result in a faster render time.
 
-## How this works
+# Citation
 
-Firstly, the gaussians are loaded from the input file, with the 3D covariance matrices being calculated using the scales and rotations of each gaussian. The original gaussian colours are calculated from the spherical harmonics (with the degree=0 since these points do not change based on direction when they are part of the point cloud). Gaussians are then culled based on the bounding box, size cut off and minimum capacity arguments. Alongside this, the normals of each Gaussians are calculated by taking the smallest axis of the Gaussian; this facilitates meshing of the point cloud later.
+If you want to know more about how this works, we recommend reading our paper below. Also, if you found our work useful, please consider citing:
 
-There is an issue with using the loaded gaussian colours for generating new points; these colours do not accurately represent the scene. When rendering an image, gaussians that overlap on each pixel each contribute to the final colour of that pixel based on their opacity and order. Hence, a gaussian that is always behind another gaussian may only contribute 10% to the final pixel colour, and thus their colour does not accurately represent the contribution to the scene.
+TO ADD
 
-![Comparison of point clouds generated using original gaussian colours vs rendered colours](https://i.imgur.com/Y9ZVZaQ.png)
-
-The fix is to use colours generated by rendering images of the scene and tracking the contributions of each gaussian at each frame. When a gaussian contributes the most to a particular pixel colour compared to other times it is rendered (e.g. the gaussian is closer to a surface at that particular camera perspective) then we assign the colour of that pixel to that gaussian. Hence, gaussians behind other colours will not have erroneous colours and will have the same colour as the rendered images. The results are much better.
-
-![Showcase of how rendering colours works compared to utilising the original gaussian colours](https://i.imgur.com/Kbkp4wI.png)
-
-Now we have all the information required to start sampling points at each gaussian. Firstly, points are distributed to all gaussians based on the volume each gaussian has. Hence, larger gaussians will have more points compared to smaller ones, meaning that areas, such as backgrounds, have proper representation. 
-
-Each of these gaussians are batched, with gaussians with the same number of points to be generated being batched together. Since larger gaussians are less common, the number of gaussians in each batch diminishes as the number of assigned points increases, which is inefficient when generating the points. Hence, after a certain number of points, these batches are 'binned' together. While this does mean that the number of generated points does not exactly match the specified argument, it is much more efficient.
-
-The Torch multivariate normal function is used to sample over the gaussian distribution in batches. However, since a gaussian distribution is not definite, points can be generated that are 'outliers' as they differ too far from the gaussian's centre. Hence, for each point, the Mahalanobis distance is calculated from the centre of each gaussian to its points. If a point has a distance greater than 2 STD, then it is considered an outlier and removed. To ensure that gaussians with lots of random outliers are represented fairly, points that were removed are regenerated and checked again, and removed if they are outliers. This process is repeated until all points have been correctly generated or a max number of attempts has been made (we set this as 5).
-
-Once all the points have been generated for all of the gaussians these points are exported to a .ply file.
-
-## Issues
-
-Currently, we are using an altered version of the gaussian renderer introduced in the Torch Splatting repo. While our alterations allow us to accurately calculate the colours of each point, the entire rendering process is slow compared to the original CUDA implementation (around 2 seconds per render). We plan on eventually implementing this into the original gaussian renderer, but this is a future plan. If anyone is up for the challenge, feel free to implement it and push to this repo :)
-
-Another improvement can be automatically generating camera positions for rendering the colours, rather than requiring a set of camera transforms.

@@ -199,6 +199,15 @@ class Gaussians():
 
         self.filter_gaussians(valid_gaussians_indices)
 
+    """def apply_k_nearest_neighbours(self, k=10):
+        tree = KDTree(self.xyz.detach().cpu().numpy())
+
+        distances, indices = tree.query(gaussian_positions, k=k)
+
+        total_distances = (np.sum(distances, axis=1)/k)
+
+        invalid_gaussians = torch.tensor(total_distances > max_dist, device="cuda:0")"""
+
     def cull_large_gaussians(self, cull_gauss_size_percent):
         """
         Orders the gaussians by size and removes gaussians with a size greater than the 'cull_gauss_size_percent'
