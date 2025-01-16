@@ -46,6 +46,7 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | transform_path       | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
 | generate_mesh        | False        |  Set to also generate a mesh based on the created point cloud  |
 | poisson_depth        | 10           |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
+| laplacian_iterations | 10           |  The number of iterations to perform laplacian mesh smoothing (higher value = smoother mesh) |
 | mesh_output_path     | 3dgs_mesh.ply|  Path to mesh output file (must be ply file) |
 | clean_pointcloud     | False        |  Set to remove outliers on the point cloud after generation (requires Open3D) |
 | camera_skip_rate     | 0            |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |

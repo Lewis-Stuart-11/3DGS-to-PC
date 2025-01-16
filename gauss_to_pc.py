@@ -508,6 +508,7 @@ def config_parser():
     
     parser.add_argument("--generate_mesh", action="store_true", help="Set to also generate a mesh based on the created point cloud (requires Open3D)")
     parser.add_argument("--poisson_depth", default=10, type=int, help="The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality) ")
+    parser.add_argument("--laplacian_iterations", default=10, type=int, help="The number of iterations to perform laplacian mesh smoothing (higher value = smoother mesh)")
     parser.add_argument("--mesh_output_path",  type=str, default="3dgs_mesh.ply", help="Path to mesh output file (must be ply file)")
 
     parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
@@ -629,7 +630,7 @@ def main():
     save_xyz_to_ply(total_point_cloud.points, args.output_path, rgb_colors=total_point_cloud.colours, 
                                                                 normals_points=total_point_cloud.normals, chunk_size=10**6)
 
-    """save_xyz_to_ply(surface_point_cloud.points, "surface_points.ply", rgb_colors=surface_point_cloud.colours, 
+    """save_xyz_to_ply(surface_point_cloud.points, "surface_points.ply", rgb_colors=surface_point_cloud.colours,
                                                                 normals_points=surface_point_cloud.normals, chunk_size=10**6)"""
 
     print()
@@ -641,7 +642,8 @@ def main():
         from mesh_handler import generate_mesh
 
         # Generate and save mesh using Open3D
-        generate_mesh(surface_point_cloud.points, surface_point_cloud.colours, surface_point_cloud.normals, args.mesh_output_path, depth=args.poisson_depth)
+        generate_mesh(surface_point_cloud.points, surface_point_cloud.colours, surface_point_cloud.normals, args.mesh_output_path, 
+                      depth=args.poisson_depth, laplacian_iters=args.laplacian_iterations)
 
     print()
 

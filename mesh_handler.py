@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-def generate_ball_pivoting_mesh():
+def generate_ball_pivoting_mesh(point_cloud, laplacian_iters=20):
     import open3d as o3d
 
     # Estimate radii for ball pivoting
@@ -14,13 +14,13 @@ def generate_ball_pivoting_mesh():
 
     # Normalise mesh using the laplacian smoothing method
     try:
-        cleaned_mesh = mesh.filter_smooth_laplacian(number_of_iterations=filter_iters, filter_scope=o3d.geometry.FilterScope.Vertex)
+        cleaned_mesh = mesh.filter_smooth_laplacian(number_of_iterations=laplacian_iters, filter_scope=o3d.geometry.FilterScope.Vertex)
     except Exception:
         cleaned_mesh = mesh
 
     return cleaned_mesh
 
-def generate_poisson_mesh(point_cloud, depth=10, filter_iters=20):
+def generate_poisson_mesh(point_cloud, depth=10, laplacian_iters=20):
     import open3d as o3d
 
     # Generate mesh using the poisson surface reconstruction
@@ -32,12 +32,12 @@ def generate_poisson_mesh(point_cloud, depth=10, filter_iters=20):
 
     # Normalise mesh using the laplacian smoothing method
     try:
-        cleaned_mesh = mesh.filter_smooth_laplacian(number_of_iterations=filter_iters, filter_scope=o3d.geometry.FilterScope.Vertex)
+        cleaned_mesh = mesh.filter_smooth_laplacian(number_of_iterations=laplacian_iters, filter_scope=o3d.geometry.FilterScope.Vertex)
         cleaned_mesh.compute_vertex_normals()
     except Exception:
         cleaned_mesh = mesh
 
-    return cleaned_mesh
+    return mesh
 
 def convert_pytorch_to_o3d_pointcloud(points, colours, normals):
     import open3d as o3d
@@ -61,7 +61,7 @@ def convert_o3d_to_pytorch_pointcloud(point_cloud, device="cuda:0"):
 
     return points, colours, normals
 
-def generate_mesh(points, colours, normals, output_path, depth=12, filter_iters=10, std_ratio=3):
+def generate_mesh(points, colours, normals, output_path, depth=12, laplacian_iters=10, std_ratio=3):
     """
     Generates a mesh from a point cloud
 
@@ -80,7 +80,7 @@ def generate_mesh(points, colours, normals, output_path, depth=12, filter_iters=
 
     point_cloud, _ = point_cloud.remove_statistical_outlier(nb_neighbors=20, std_ratio=std_ratio)
 
-    mesh = generate_poisson_mesh(point_cloud, depth=depth, filter_iters=filter_iters)
+    mesh = generate_poisson_mesh(point_cloud, depth=depth, laplacian_iters=laplacian_iters)
 
     o3d.io.write_triangle_mesh(output_path, mesh)
 
