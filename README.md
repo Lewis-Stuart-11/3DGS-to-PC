@@ -70,7 +70,7 @@ This repo offers functionality for generating a mesh from a 3DGS scene. For this
 pip install open3d 
 ```
 
-Our mesh reconstruction works by generating a point cloud only containing the predicted surfaces of the scene (by culling Gaussians that do not contribute more than 25% to the final pixel colour). Poisson surface reconstruction and laplacian smoothing are then used to generate a final mesh of the scene. The meshes that are generated using this method properly represent the entire scene, but often struggle with fine details. For generating a more accurate mesh, we recommend checking out [SuGaR](https://anttwo.github.io/sugar/).
+Our mesh reconstruction works by generating a point cloud only containing the predicted surfaces of the scene (by culling Gaussians that do not have a maximum contribution greater than the average maximum contribution of each Gaussian). Poisson surface reconstruction and laplacian smoothing are then used to generate a final mesh of the scene. The meshes that are generated using this method properly represent the entire scene, but often struggle with fine details. For generating a more accurate mesh, we recommend checking out [SuGaR](https://anttwo.github.io/sugar/).
 
 ![Comparison of the generated point cloud and mesh for the bulldozer scene](https://i.imgur.com/Lzwhatr.png)
 
