@@ -16,6 +16,7 @@ from gauss_handler import Gaussians
 
 from transform_dataloader import load_transform_data
 from gauss_dataloader import load_gaussians, save_xyz_to_ply
+from mesh_handler import clean_point_cloud
 
 from gauss_render import GaussRenderer
 from camera_handler import Camera
@@ -36,6 +37,7 @@ class GaussPointCloudSettings(NamedTuple):
         colour_resolution: resolution of the image to render for determining the point colours
         exact_num_points: number of attempts to generate all points for gaussians with the same number of assigned points 
         device: torch device
+        preclean_pointcloud: set to remove outliers from the input point cloud
     """
     num_points: int
     std_distance: float
@@ -52,6 +54,7 @@ class GaussPointCloudSettings(NamedTuple):
     exact_num_points: int
     generate_mesh: bool
     device: str
+    preclean_pointcloud: bool
 
 class PointCloudData(NamedTuple):
     points: torch.Tensor
@@ -365,6 +368,16 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     
     # Load gaussian data from file
     xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
+    
+    # Remove outliers from the point cloud
+    if pointcloud_settings.preclean_pointcloud:
+        cleaned_xyz, _, _ = clean_point_cloud(xyz, colours, None)
+        mask = torch.isin(xyz, cleaned_xyz).all(dim=1)
+        xyz = xyz[mask]
+        scales = scales[mask]
+        rots = rots[mask]
+        colours = colours[mask]
+        opacities = opacities[mask]
 
     gaussians = Gaussians(xyz, scales, rots, colours, opacities)
 
@@ -512,6 +525,8 @@ def config_parser():
     parser.add_argument("--mesh_output_path",  type=str, default="3dgs_mesh.ply", help="Path to mesh output file (must be ply file)")
 
     parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
+    
+    parser.add_argument("--preclean_pointcloud", action="store_true", help="Set to remove outliers on the input point cloud (requires Open3D)")
 
     parser.add_argument("--camera_skip_rate", type=int, default=0, help="Number of cameras to skip for each rendered camera (reduces compute time- only use if cameras in linear trajectory)")
     
@@ -602,7 +617,8 @@ def main():
         exact_num_points = args.exact_num_points,
         generate_mesh = args.generate_mesh,
         remove_unrendered_gaussians = True,
-        device="cuda:0" if torch.cuda.is_available() else "cpu"
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        preclean_pointcloud = args.preclean_pointcloud,
     )
 
     # Generate point cloud from 3DGS scene
