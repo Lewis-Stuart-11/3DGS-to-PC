@@ -215,22 +215,32 @@ def get_transform_intrinsics(transforms, fname):
 
     intrinsics = [0, 0, 0, 0]
 
-    intrinsics[2] = transforms["fl_x"]
-
-    if "fl_y" in transforms.keys():
-        intrinsics[3] = transforms["fl_y"] 
-    else:
-        # Assuming that focal lengths are same in both dimensions
-        intrinsics[3] = intrinsics[2]
-
     if "w" in transforms and "h" in transforms:
         intrinsics[0] = transforms["w"] 
         intrinsics[1] = transforms["h"] 
     else:
+        if not os.path.exists(fname):
+            raise Exception(f"Image with path {fname} does not exist")
+
         img_pixels = cv2.imread(fname)
 
         intrinsics[0] = img_pixels.shape[1]
         intrinsics[1] = img_pixels.shape[0]
+
+    if "fl_x" in transforms.keys():
+        intrinsics[2] = transforms["fl_x"]
+    elif "camera_angle_x" in transforms.keys():
+        intrinsics[2] = 0.5 * intrinsics[0] / np.tan(0.5 * transforms["camera_angle_x"])
+    else:
+        raise Exception("A focal length (fl_x) or field of view (camera_angle_x) must be provided")
+
+    if "fl_y" in transforms.keys():
+        intrinsics[3] = transforms["fl_y"] 
+    elif "camera_angle_y" in transforms.keys():
+        intrinsics[3] = 0.5 * intrinsics[1] / np.tan(0.5 * transforms["camera_angle_y"])
+    else:
+        # Assuming that focal lengths are same in both dimensions
+        intrinsics[3] = intrinsics[2]
 
     return intrinsics
 
@@ -246,7 +256,7 @@ def load_transform_json_data(input_path, skip_rate=0):
     intrinsics = {}
 
     all_intrinsics = None 
-    if "fl_x" in transforms.keys():
+    if "fl_x" in transforms.keys() or "camera_angle_x" in transforms.keys():
         all_intrinsics = get_transform_intrinsics(transforms, transforms["frames"][0]["file_path"])
     
     for i, frame in enumerate(transforms["frames"]):
