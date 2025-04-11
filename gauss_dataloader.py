@@ -97,7 +97,7 @@ def load_splat_data(path):
     return xyz_tensor, scales_tensor, rots_tensor, colours_tensor, opacities
 
     
-def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, normals_points=None, chunk_size=10**6):
+def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, normals_points=None, chunk_size=10**6, quiet=False):
     """
     Save a series of XYZ points to a PLY file.
 
@@ -151,7 +151,7 @@ end_header
 
         ply_file.write(header.encode('utf-8'))
 
-        for i in tqdm(range(num_chunks), position=0, leave=True):
+        for i in tqdm(range(num_chunks), position=0, leave=True, disable=quiet):
             start_idx = i * chunk_size
             end_idx = min(start_idx + chunk_size, total_points)
 

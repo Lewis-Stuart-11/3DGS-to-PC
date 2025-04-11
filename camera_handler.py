@@ -5,36 +5,6 @@ import math
 import numpy as np
 import torch
 
-"""def generate_cam_positions(radius, rings=5, sectors=5):
-    ring_d = 1.0/(rings)
-    sect_d = 1.0/(sectors)
-
-    cut_off = 0.3
-    ring_d *= (1-cut_off)
-
-    cam_positions = []
-
-    for sect in range(sectors):
-        for ring in range(1, rings+1, 1):
-            x = cos(2 * pi * sect * sect_d) 
-            y = sin(2 * pi * sect * sect_d) 
-                
-            x *= sin(pi * ring * ring_d)
-            y *= sin(pi * ring * ring_d)
-
-            z = -sin(-(pi/2) + (pi * ring * ring_d))
-
-            x *= radius
-            y *= radius
-            z *= radius
-
-            cam_positions.append([x,y,z])
-
-    return cam_positions
-
-def generate_predicted_dataset_cams(radius, conex_pattern = True):
-    pass"""
-
 def fov2focal(fov, pixels):
     return pixels / (2 * math.tan(fov / 2))
 
@@ -77,4 +47,58 @@ class Camera():
         self.c2w = c2w
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(c2w.device)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.full_proj_transform = self.world_view_transform @ self.projection_matrix
+
+
+def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920):
+    diff = colour_resolution / int(cam_intrinsic[0])
+
+    img_width = int(int(cam_intrinsic[0]) * diff) 
+    img_height = int(int(cam_intrinsic[1]) * diff) 
+
+    focal_x = float(cam_intrinsic[2])*diff
+    focal_y = float(cam_intrinsic[3])*diff
+
+    if renderer_type == "python":
+        return Camera(img_width, img_height, focal_x, focal_y, transform)
+
+    elif renderer_type == "cuda":
+        from gaussian_pointcloud_rasterization import GaussianRasterizationSettings
+
+        transform[:, 1:3] = -transform[:, 1:3]
+
+        fovX = focal2fov(focal_x, img_width)
+        fovY = focal2fov(focal_y, img_height)
+
+        tanfovx = math.tan(fovX * 0.5)
+        tanfovy = math.tan(fovY * 0.5)
+
+        scaling_modifier = 1.0
+        sh_degree = 0
+        white_bkgd = True
+        
+        znear = 10
+        zfar = 100
+
+        projmatrix = getProjectionMatrix(znear=znear, zfar=zfar, fovX=fovX, fovY=fovY).transpose(0,1).to(transform.device)
+
+        viewmatrix = torch.linalg.inv(transform).permute(1,0)
+        campos = viewmatrix.inverse()[3, :3]
+
+        return GaussianRasterizationSettings(
+            image_height=int(img_height),
+            image_width=int(img_width),
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=torch.tensor([0.,0.,0.], device="cuda:0") if not white_bkgd else torch.tensor([1.0,1.0,1.0], device="cuda:0"),
+            scale_modifier=scaling_modifier,
+            campos=campos, 
+            viewmatrix=viewmatrix,
+            projmatrix=viewmatrix @ projmatrix,
+            sh_degree=sh_degree,
+            prefiltered=False,
+            debug=True,
+            antialiasing=False
+        )
+
 

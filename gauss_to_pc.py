@@ -17,8 +17,8 @@ from gauss_handler import Gaussians
 from transform_dataloader import load_transform_data
 from gauss_dataloader import load_gaussians, save_xyz_to_ply
 
-from gauss_render import GaussRenderer
-from camera_handler import Camera
+from gauss_render import get_renderer
+from camera_handler import get_camera
 
 COLOR_QUALITY_OPTIONS = {"tiny": 180, "low": 360, "medium": 720, "high": 1280, "ultra": 1920}
 
@@ -37,6 +37,7 @@ class GaussPointCloudSettings(NamedTuple):
         exact_num_points: number of attempts to generate all points for gaussians with the same number of assigned points 
         device: torch device
     """
+    renderer_type: str
     num_points: int
     std_distance: float
     camera_skip_rate: int
@@ -50,7 +51,9 @@ class GaussPointCloudSettings(NamedTuple):
     colour_resolution: int
     max_sh_degree: int
     exact_num_points: int
+    visibility_threshold: float
     generate_mesh: bool
+    quiet: bool
     device: str
 
 class PointCloudData(NamedTuple):
@@ -245,7 +248,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
 
     return new_points, new_colours, new_normals
 
-def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=False, calculate_normals=True, num_sample_attempts=5, device="cuda:0"):
+def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=False, calculate_normals=True, num_sample_attempts=5, device="cuda:0", quiet=False):
 
     """
     Generates a pointcloud from a set of gaussians
@@ -268,8 +271,9 @@ def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=
     # Calculate Gaussian sizes
     gaussian_sizes = gaussians.get_gaussian_sizes()
 
-    print(f"Distributed Points to Gaussians")
-    print()
+    if not quiet:
+        print(f"Distributed Points to Gaussians")
+        print()
 
     # Assign points to gaussians 
     points_per_gaussian = distribute_points(gaussian_sizes, num_points).type(torch.int)
@@ -286,10 +290,11 @@ def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=
     total_colours = torch.tensor([], device=device).type(torch.double)
     total_normals = torch.tensor([], device=device).type(torch.double) if calculate_normals else None 
 
-    print(f"Starting Point Cloud Generation")
+    if not quiet:
+        print(f"Starting Point Cloud Generation")
 
     # Iterate through different number of points 
-    for i in tqdm(range(point_distribution.shape[0]), position=0, leave=True):
+    for i in tqdm(range(point_distribution.shape[0]), position=0, leave=True, disable=quiet):
 
         start_range = point_distribution[i]
 
@@ -355,13 +360,15 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
 
     # Transform path has been provided, so use those camera positions and intrinsics 
     if transform_path is not None:
-        print("Loading Camera Poses")
-        print()
+        if not pointcloud_settings.quiet:
+            print("Loading Camera Poses")
+            print()
 
         transforms, intrinsics = load_transform_data(transform_path, skip_rate=pointcloud_settings.camera_skip_rate)
 
-    print("Loading Gaussians from File")
-    print()
+    if not pointcloud_settings.quiet:
+        print("Loading Gaussians from File")
+        print()
     
     # Load gaussian data from file
     xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
@@ -380,16 +387,17 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     # Rendered colours has been set 
     if pointcloud_settings.render_colours:
 
-        print("Rendering Gaussian Colours")
+        if not pointcloud_settings.quiet:
+            print("Rendering Gaussian Colours")
 
         # Initialise the gaussian renderer
-        gaussian_renderer = GaussRenderer(gaussians.xyz, torch.unsqueeze(torch.clone(gaussians.opacities), 1).type(torch.float),
-                                              gaussians.colours, gaussians.covariances)
+        gaussian_renderer = get_renderer(pointcloud_settings.renderer_type, gaussians.xyz, torch.unsqueeze(torch.clone(gaussians.opacities), 1), 
+                                         gaussians.colours, gaussians.covariances, visible_gaussian_threshold=pointcloud_settings.visibility_threshold)
         
         if transform_path is not None:
 
             # Render colours for each camera
-            for i in tqdm(range(len(transforms)), position=0, leave=True):
+            for i in tqdm(range(len(transforms)), position=0, leave=True, disable=pointcloud_settings.quiet):
 
                 img_name, transform = list(transforms.items())[i]
 
@@ -397,28 +405,21 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
 
                 cam_intrinsic = intrinsics[img_name]
 
-                cam_matrix = torch.eye(4, device=pointcloud_settings.device) 
+                camera = get_camera(pointcloud_settings.renderer_type, transform, cam_intrinsic, colour_resolution=pointcloud_settings.colour_resolution)
 
-                # Rescale cam parameters to match the given render resolution
-                diff = pointcloud_settings.colour_resolution / int(cam_intrinsic[0])
+                # Render new image and Gaussian contributions
+                render, _, _ = gaussian_renderer(camera)
 
-                img_width = int(int(cam_intrinsic[0]) * diff) 
-                img_height = int(int(cam_intrinsic[1]) * diff) 
-
-                focal_x = float(cam_intrinsic[2])*diff
-                focal_y = float(cam_intrinsic[3])*diff
-
-                camera = Camera(img_width, img_height, focal_x, focal_y, transform)
-
-                # Render a new image
-                render = gaussian_renderer.add_img(camera).detach().cpu().numpy()
-
-                #imwrite(f"results\\{i}.png", render)
+                """if pointcloud_settings.renderer_type == "cuda":
+                    import torchvision
+                    torchvision.utils.save_image(render, f"cuda-{i}.png")
+                else:
+                    imwrite(f"python-{i}.png", render.detach().cpu().numpy())"""
         else:
             raise Exception("Transforms are required to render colours")   
 
         # Get new rendered gaussian colours
-        gaussians.colours = gaussian_renderer.get_colours()
+        gaussians.colours = gaussian_renderer.get_gaussian_colours()
 
         # Remove gaussians that were not rendered at all
         if pointcloud_settings.remove_unrendered_gaussians:
@@ -435,22 +436,26 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         # Convert colours from (0-1) to (0-255)
         gaussians.colours *= 255
 
-        print("Skipping Rendering Gaussian Colours")
+        if not pointcloud_settings.quiet:
+            print("Skipping Rendering Gaussian Colours")
     
-    print()
+    if not pointcloud_settings.quiet:
+        print()
 
     # Number of attempts per point number generation
     num_sample_attempts = 5 if not pointcloud_settings.exact_num_points else 100
 
-    print("Starting Point Cloud Generation for All Gaussians")
-    print()
+    if not pointcloud_settings.quiet:
+        print("Starting Point Cloud Generation for All Gaussians")
+        print()
 
     # Generate points for the point cloud of the entire scene
     points, colours, normals = generate_pointcloud(gaussians, pointcloud_settings.num_points, exact_num_points=pointcloud_settings.exact_num_points, 
                                                                                               std_distance = pointcloud_settings.std_distance, 
                                                                                               device=pointcloud_settings.device, 
                                                                                               calculate_normals=pointcloud_settings.calculate_normals,
-                                                                                              num_sample_attempts=num_sample_attempts)
+                                                                                              num_sample_attempts=num_sample_attempts,
+                                                                                              quiet=pointcloud_settings.quiet)
 
     total_point_cloud = PointCloudData(
         points = points,
@@ -458,14 +463,16 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         normals = normals
     )
 
-    print()
+    if not pointcloud_settings.quiet:
+        print()
 
     surface_point_cloud = None
 
     # Generate surface point cloud if meshing the scene
     if pointcloud_settings.generate_mesh and pointcloud_settings.render_colours:
-        print("Starting Point Cloud Generation for Surface Gaussians")
-        print()
+        if not pointcloud_settings.quiet:
+            print("Starting Point Cloud Generation for Surface Gaussians")
+            print()
 
         # Ensure that only surface gaussians are now included
         gaussians.filter_gaussians(surface_gaussian_idxs)
@@ -479,7 +486,8 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         # Generate points for the point cloud of the entire scene
         points, colours, normals = generate_pointcloud(gaussians, total_mesh_points, exact_num_points=pointcloud_settings.exact_num_points, 
                                                                                      num_sample_attempts=num_sample_attempts,
-                                                                                     device=pointcloud_settings.device)
+                                                                                     device=pointcloud_settings.device,
+                                                                                     quiet=pointcloud_settings.quiet)
 
         surface_point_cloud = PointCloudData(
             points = points,
@@ -487,7 +495,8 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
             normals = normals
         )
 
-        print()
+        if not pointcloud_settings.quiet:
+            print()
 
     # Clear memory 
     torch.cuda.empty_cache()  
@@ -503,20 +512,23 @@ def config_parser():
     parser.add_argument("--output_path",  type=str, default="3dgs_pc.ply", help="Path to output file (must be ply file)")
     parser.add_argument("--transform_path", default=None, type=str, help="Path to COLMAP or Transform file used for loading in camera positions for rendering")
 
+    parser.add_argument("--renderer_type", type=str, default="cuda", help="The type of renderer to use for determining point colours (currently supports 'cuda' or 'python')")
+
     parser.add_argument("--num_points", type=int, default=10000000, help="Total number of points to generate for the pointcloud")
     parser.add_argument("--exact_num_points", action="store_true", help="Set if the number of generated points should more closely match the num_points argument (slower)")
+
+    parser.add_argument("--visibility_threshold", type=float, default=0.05, help="Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise)")
+    parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
     
     parser.add_argument("--generate_mesh", action="store_true", help="Set to also generate a mesh based on the created point cloud (requires Open3D)")
     parser.add_argument("--poisson_depth", default=10, type=int, help="The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality) ")
-    parser.add_argument("--laplacian_iterations", default=10, type=int, help="The number of iterations to perform laplacian mesh smoothing (higher value = smoother mesh)")
+    parser.add_argument("--laplacian_iterations", default=10, type=int, help="The number of iterations to perform laplacian mesh smoothing (larger value = smoother mesh)")
     parser.add_argument("--mesh_output_path",  type=str, default="3dgs_mesh.ply", help="Path to mesh output file (must be ply file)")
-
-    parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
 
     parser.add_argument("--camera_skip_rate", type=int, default=0, help="Number of cameras to skip for each rendered camera (reduces compute time- only use if cameras in linear trajectory)")
     
     parser.add_argument("--no_render_colours", action="store_true", help="Skip rendering colours- faster but colours will be strange")
-    parser.add_argument("--colour_quality", type=str, default="medium", help="The quality of the colours when generating the point cloud (more quality = slower processing time)")
+    parser.add_argument("--colour_quality", type=str, default="high", help="The quality of the colours when generating the point cloud (more quality = slower processing time)")
 
     parser.add_argument("--bounding_box_min", nargs=3, help="Values for minimum position of gaussians to include in generating the new point cloud")
     parser.add_argument("--bounding_box_max", nargs=3, help="Values for maximum position of gaussians to include in generating the new point cloud")
@@ -530,6 +542,8 @@ def config_parser():
     parser.add_argument("--cull_gaussian_sizes", type=float, default=0.0, help="The percentage of gaussians to remove from largest to smallest (used to remove large gaussians)")
 
     parser.add_argument("--max_sh_degree", type=int, default=3, help="The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded)")
+
+    parser.add_argument("--quiet", action="store_true", help="Set to surpress any output print statements")
 
     args = parser.parse_args()
 
@@ -581,6 +595,9 @@ def config_parser():
     if not args.no_render_colours and args.transform_path is None:
         raise AttributeError(f"Transforms are required for rendering accurate point colours, set --no_render_colours to True to render with no colour")
 
+    if args.visibility_threshold < 0.0 or args.visibility_threshold > 1.0:
+        raise AttributeError(f"Visible Gaussian Threshold must be between 0 and 1")
+
     return args
 
 def main():
@@ -588,6 +605,7 @@ def main():
 
     # All config info required for generating the point cloud
     pointcloud_settings = GaussPointCloudSettings(
+        renderer_type=args.renderer_type,
         num_points=args.num_points,
         std_distance=args.std_distance,
         camera_skip_rate=args.camera_skip_rate,
@@ -601,6 +619,8 @@ def main():
         max_sh_degree=args.max_sh_degree, 
         exact_num_points = args.exact_num_points,
         generate_mesh = args.generate_mesh,
+        visibility_threshold=args.visibility_threshold,
+        quiet=args.quiet,
         remove_unrendered_gaussians = True,
         device="cuda:0" if torch.cuda.is_available() else "cpu"
     )
@@ -610,13 +630,14 @@ def main():
     
     # Clean point cloud if set
     if args.clean_pointcloud:
-        print("Cleaning Point Cloud")
+        if not args.quiet:
+            print("Cleaning Point Cloud")
 
         from mesh_handler import clean_point_cloud
 
         # Clean point cloud using Open3D
         cleaned_points, cleaned_colours, cleaned_normals = clean_point_cloud(total_point_cloud.points, total_point_cloud.colours, 
-                                                                             total_point_cloud.normals, device=pointcloud_settings.device)
+                                                                            total_point_cloud.normals, device=pointcloud_settings.device)
 
         total_point_cloud = PointCloudData(
             points = cleaned_points,
@@ -624,28 +645,29 @@ def main():
             normals = cleaned_normals
         )
 
-    print("Saving Final Point Cloud")
+    if not args.quiet:
+        print("Saving Final Point Cloud")
 
     # Save point cloud
     save_xyz_to_ply(total_point_cloud.points, args.output_path, rgb_colors=total_point_cloud.colours, 
-                                                                normals_points=total_point_cloud.normals, chunk_size=10**6)
+                                                                normals_points=total_point_cloud.normals, chunk_size=10**6, quiet=args.quiet)
 
     """save_xyz_to_ply(surface_point_cloud.points, "surface_points.ply", rgb_colors=surface_point_cloud.colours,
                                                                 normals_points=surface_point_cloud.normals, chunk_size=10**6)"""
 
-    print()
+    if not args.quiet:
+        print()
 
     # Generate mesh from surface point cloud
     if pointcloud_settings.generate_mesh:
-        print("Generating Mesh")
+        if not args.quiet:
+            print("Generating Mesh")
 
         from mesh_handler import generate_mesh
 
         # Generate and save mesh using Open3D
         generate_mesh(surface_point_cloud.points, surface_point_cloud.colours, surface_point_cloud.normals, args.mesh_output_path, 
                       depth=args.poisson_depth, laplacian_iters=args.laplacian_iterations)
-
-    print()
 
 if __name__ == "__main__":
     main()
