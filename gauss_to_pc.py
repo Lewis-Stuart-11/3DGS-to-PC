@@ -621,7 +621,7 @@ def main():
         generate_mesh = args.generate_mesh,
         visibility_threshold=args.visibility_threshold,
         quiet=args.quiet,
-        remove_unrendered_gaussians = True,
+        remove_unrendered_gaussians=True if args.visibility_threshold > 0 else False,
         device="cuda:0" if torch.cuda.is_available() else "cpu"
     )
 
