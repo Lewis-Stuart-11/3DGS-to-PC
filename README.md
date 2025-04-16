@@ -6,7 +6,8 @@ This repo offers scripts for converting a 3D Gaussian Splatting scene into a den
 
 1) **Technical Paper:** *https://arxiv.org/abs/2501.07478*
 2) **Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
-2) **Youtube Video:** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
+3) **Youtube Video (1):** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
+4) **Youtube Video (2):** *https://www.youtube.com/watch?v=iB1WDiYxkws*
 
 <p align="center">
   <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHA5MXptbjBjOGY1MzVwczFyejIydW1zdmdmejQ0aThkOG8wMXE2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7UknswhXAHe88S93OY/giphy-downsized-large.gif" width="45%" />
@@ -54,11 +55,11 @@ The transform path can either be to a transforms.json file or COLMAP output file
 
 | Argument             | Default Value  | Description |
 | :---                 |  :----:      |          ---: |
-| **input_path**           | -            |  Path to ply or splat file to convert to a point cloud |
+| **input_path**       | -            |  Path to ply or splat file to convert to a point cloud |
 | output_path          | 3dgs_pc.ply  |  Path to output file (must be ply file) |
-| **transform_path**       | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
+| **transform_path**   | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
 | renderer_type        | cuda         |  The type of renderer to use for determining point colours (currently supports 'cuda' or 'python') |
-| **num_points**           | 10000000     |  Total number of points to generate for the pointcloud |
+| **num_points**       | 10000000     |  Total number of points to generate for the pointcloud |
 | exact_num_points     | False        |  Set if the number of generated points should more closely match the num_points argument (slower) |
 | visibility_threshold | 0.05         |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise)|
 | clean_pointcloud     | False        |  Set to remove outliers on the point cloud after generation (requires Open3D) |
