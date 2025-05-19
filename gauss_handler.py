@@ -67,23 +67,25 @@ class Gaussians():
     Manages all loaded gaussians in the renderer
     """
 
-    def __init__(self, xyz, scales, rots, colours, opacities):
+    def __init__(self, xyz, scales, rots, colours, opacities, shs=None):
         self.xyz = xyz
         self.scales = scales
         self.rots = rots
         self.opacities = opacities
         self.colours = colours
+        self.shs = shs
         self.normals = None
 
         self.scaling_modifier = 1.0
 
         # Calculates 3D covariance matrices
-        covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
-
-        # Validate and add covariances matrices
-        self.validate_and_add_covariances(covariances)
+        self.covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
 
     def calculate_normals(self):
+        """
+        Determines the normal of each Gaussian by determining the smallest side
+        """
+        
         # Choose the smallest side of the Gaussian for the normal 
         min_values = torch.min(self.scales, 1)
 
@@ -98,11 +100,11 @@ class Gaussians():
 
         self.normals = normals.permute(0, 2, 1).squeeze(1)
 
-    def non_posdef_covariances(self, covariances):
+    def non_posdef_covariances(self, covariances,  epsilon: float = 1e-10):
         """
         Returns a boolean mask of which covariances are definitepositive
         """
-        return torch.any(torch.linalg.eigvals(covariances).real <= 0, 1)
+        return torch.any(torch.linalg.eigvals(covariances).real <= epsilon, 1)
 
     def clamp_covariances(self, covariances, mask=None, epsilon=1e-6):
         """
@@ -119,10 +121,11 @@ class Gaussians():
 
         return covariances
 
-    def regularise_covariances(self, covariances, mask=None, epsilon=1e-6):
+    def regularise_covariances(self, covariances, mask=None, epsilon=5e-7):
         """
         Increases the value of the diagonal of the covariances matrices to ensure it is positive-definite
         """
+
         if mask is None:
             mask = torch.ones(covariances.shape[0], dtype=torch.bool)
 
@@ -131,25 +134,26 @@ class Gaussians():
 
         return covariances
 
-    def validate_and_add_covariances(self, covariances):
+    def validate_covariances(self, regularise=True, epsilon=1e-7, min_ps_epsilon=1e-8, num_clamp_iters=3):
         """
         Regularises Gaussian covariances and ensures that all covariances are positive-definite
         since sometimes gaussian values are slightly wrong when loaded (most likely due to floating point errors)
         """
 
         # Regularises gaussians with a low factor, which ensures almost all covaricnes are positive-definite
-        covariances = self.regularise_covariances(covariances)
-        
+        validated_covariances = self.regularise_covariances(self.covariances) if regularise else self.covariances
+
         # Check if any non positive-definite covariances exist, if so, clamp gaussians to ensure
         # all covariances are positive-definite
-        non_positive_covariances = self.non_posdef_covariances(covariances)
-        if non_positive_covariances.sum() > 0:
-            covariances = self.clamp_covariances(covariances, mask=non_positive_covariances, epsilon=0.001)
+        for i in range(num_clamp_iters):
+            non_positive_covariances = self.non_posdef_covariances(validated_covariances, epsilon=epsilon)
+            if non_positive_covariances.sum() > 0:
+                validated_covariances = self.clamp_covariances(validated_covariances, mask=non_positive_covariances, epsilon=epsilon)
 
-        self.covariances = covariances
+        self.covariances = validated_covariances
 
         # If still not positive-definite then delete erroneous Gaussians
-        non_positive_covariances = self.non_posdef_covariances(covariances)
+        non_positive_covariances = self.non_posdef_covariances(self.covariances, epsilon=min_ps_epsilon)
         if non_positive_covariances.sum() > 0:
             self.filter_gaussians(~non_positive_covariances)
 
@@ -164,6 +168,9 @@ class Gaussians():
         self.colours = self.colours[filter_indices]
         self.opacities = self.opacities[filter_indices]
         self.covariances = self.covariances[filter_indices]
+        
+        if self.shs is not None:
+            self.shs = self.shs[filter_indices]
         
         if self.normals is not None:
             self.normals = self.normals[filter_indices]
@@ -213,15 +220,17 @@ class Gaussians():
         Orders the gaussians by size and removes gaussians with a size greater than the 'cull_gauss_size_percent'
         """
 
-        gaussian_sizes = self.get_gaussian_sizes()
+        if cull_gauss_size_percent > 0.0:
 
-        cull_index = floor(gaussian_sizes.shape[0] *(1-cull_gauss_size_percent))
+            gaussian_sizes = self.get_gaussian_sizes()
 
-        sorted_sizes, sorted_indices = torch.sort(gaussian_sizes)
+            cull_index = floor(gaussian_sizes.shape[0] *(1-cull_gauss_size_percent))
 
-        culled_gaussians = sorted_indices[:cull_index]
+            sorted_sizes, sorted_indices = torch.sort(gaussian_sizes)
 
-        self.filter_gaussians(culled_gaussians)
+            culled_gaussians = sorted_indices[:cull_index]
+
+            self.filter_gaussians(culled_gaussians)
 
     def get_gaussian_sizes(self):
         """

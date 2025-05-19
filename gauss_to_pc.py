@@ -371,9 +371,9 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         print()
     
     # Load gaussian data from file
-    xyz, scales, rots, colours, opacities = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
+    xyz, scales, rots, colours, opacities, shs = load_gaussians(input_path, max_sh_degree=pointcloud_settings.max_sh_degree)
 
-    gaussians = Gaussians(xyz, scales, rots, colours, opacities)
+    gaussians = Gaussians(xyz, scales, rots, colours, opacities, shs=shs)
 
     # Calculate Gaussian Normals
     if pointcloud_settings.calculate_normals:
@@ -393,7 +393,7 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         # Initialise the gaussian renderer
         gaussian_renderer = get_renderer(pointcloud_settings.renderer_type, gaussians.xyz, torch.unsqueeze(torch.clone(gaussians.opacities), 1), 
                                          gaussians.colours, gaussians.covariances, visible_gaussian_threshold=pointcloud_settings.visibility_threshold)
-        
+
         if transform_path is not None:
 
             # Render colours for each camera
@@ -405,7 +405,8 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
 
                 cam_intrinsic = intrinsics[img_name]
 
-                camera = get_camera(pointcloud_settings.renderer_type, transform, cam_intrinsic, colour_resolution=pointcloud_settings.colour_resolution)
+                camera = get_camera(pointcloud_settings.renderer_type, transform, cam_intrinsic, 
+                                    colour_resolution=pointcloud_settings.colour_resolution, sh_degree=pointcloud_settings.max_sh_degree)
 
                 # Render new image and Gaussian contributions
                 render, _, _ = gaussian_renderer(camera)
@@ -415,6 +416,7 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
                     torchvision.utils.save_image(render, f"cuda-{i}.png")
                 else:
                     imwrite(f"python-{i}.png", render.detach().cpu().numpy())"""
+
         else:
             raise Exception("Transforms are required to render colours")   
 
@@ -432,20 +434,24 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         del gaussian_renderer
     
     else:
-
         # Convert colours from (0-1) to (0-255)
         gaussians.colours *= 255
 
         if not pointcloud_settings.quiet:
             print("Skipping Rendering Gaussian Colours")
-    
+
     if not pointcloud_settings.quiet:
         print()
+        print("Ensuring Gaussians are Positive Semidefinite")
+
+    # Validate covariances matrices to ensure they are positive semidefinite
+    gaussians.validate_covariances()
 
     # Number of attempts per point number generation
     num_sample_attempts = 5 if not pointcloud_settings.exact_num_points else 100
 
     if not pointcloud_settings.quiet:
+        print()
         print("Starting Point Cloud Generation for All Gaussians")
         print()
 

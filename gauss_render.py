@@ -458,7 +458,7 @@ class GaussPythonRenderer():
 
             raise Exception("Failed to render image")
 
-def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, visible_gaussian_threshold=0.0):
+def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, shs=None, visible_gaussian_threshold=0.0):
     if renderer_type == "cuda":
         try:
             from gaussian_pointcloud_rasterization import GaussianRasterizer as GaussianPCRasterizer
@@ -467,9 +467,15 @@ def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, visib
 
         means2D = torch.zeros_like(xyz, dtype=xyz.dtype, device="cuda") + 0
 
-        return GaussianPCRasterizer(xyz.to(torch.float), means2D, opacities.type(torch.float),
-                                    colors_precomp=colours.to(torch.float), cov3D_precomp=strip_symmetric(covariances).to(torch.float),
-                                    visible_gaussian_threshold=visible_gaussian_threshold)
+        if shs is None:
+            return GaussianPCRasterizer(xyz.to(torch.float), means2D, opacities.type(torch.float),
+                                        colors_precomp=colours.to(torch.float), cov3D_precomp=strip_symmetric(covariances).to(torch.float),
+                                        visible_gaussian_threshold=visible_gaussian_threshold)
+        else:
+            return GaussianPCRasterizer(xyz.to(torch.float), means2D, opacities.type(torch.float),
+                                        shs=shs.to(torch.float), cov3D_precomp=strip_symmetric(covariances).to(torch.float),
+                                        visible_gaussian_threshold=visible_gaussian_threshold)
+
     elif renderer_type == "python":
         return GaussPythonRenderer(xyz, opacities.type(torch.float), colours, covariances, 
                                    visible_gaussian_threshold=visible_gaussian_threshold)

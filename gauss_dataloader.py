@@ -61,7 +61,7 @@ def load_ply_data(path, max_sh_degree=3):
     scales_tensor = torch.tensor(scales, device="cuda:0")
     rots_tensor = torch.tensor(rots/np.expand_dims(np.linalg.norm(rots, axis=1), 1), device="cuda:0") 
 
-    return xyz_tensor, scales_tensor, rots_tensor, colours, opacities
+    return xyz_tensor, scales_tensor, rots_tensor, colours, opacities, features_all
 
 def load_splat_data(path):
     """
@@ -94,7 +94,7 @@ def load_splat_data(path):
     
     rots_tensor = torch.tensor((rots.astype(np.float32) - 128) / 128, device="cuda:0")
     
-    return xyz_tensor, scales_tensor, rots_tensor, colours_tensor, opacities
+    return xyz_tensor, scales_tensor, rots_tensor, colours_tensor, opacities, None
 
     
 def save_xyz_to_ply(xyz_points, filename, rgb_colors=None, normals_points=None, chunk_size=10**6, quiet=False):
@@ -190,4 +190,4 @@ def load_gaussians(input_path, max_sh_degree=3):
     elif file_extension == ".ply":
         return load_ply_data(input_path, max_sh_degree=max_sh_degree)
     else:
-        raise AttributeError("Unsupported input type {file_extension}")
+        raise AttributeError(f"Unsupported input type {file_extension}")

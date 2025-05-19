@@ -50,7 +50,7 @@ class Camera():
         self.full_proj_transform = self.world_view_transform @ self.projection_matrix
 
 
-def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920):
+def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920, sh_degree=3):
     diff = colour_resolution / int(cam_intrinsic[0])
 
     img_width = int(int(cam_intrinsic[0]) * diff) 
@@ -74,7 +74,6 @@ def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920):
         tanfovy = math.tan(fovY * 0.5)
 
         scaling_modifier = 1.0
-        sh_degree = 0
         white_bkgd = True
         
         znear = 10

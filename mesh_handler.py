@@ -44,6 +44,8 @@ def convert_pytorch_to_o3d_pointcloud(points, colours, normals):
 
     point_cloud = o3d.geometry.PointCloud()
 
+    colours = torch.clamp(colours, min=0, max=255).to(torch.int32)
+
     # Add points, normals and colours to point cloud object
     point_cloud.points = o3d.utility.Vector3dVector(points.detach().cpu().numpy())
     point_cloud.colors =  o3d.utility.Vector3dVector(colours.detach().cpu().numpy()/255)
