@@ -85,7 +85,7 @@ class Gaussians():
         """
         Determines the normal of each Gaussian by determining the smallest side
         """
-        
+
         # Choose the smallest side of the Gaussian for the normal 
         min_values = torch.min(self.scales, 1)
 
@@ -222,7 +222,7 @@ class Gaussians():
 
         if cull_gauss_size_percent > 0.0:
 
-            gaussian_sizes = self.get_gaussian_sizes()
+            gaussian_sizes = self.get_gaussian_magnitudes()
 
             cull_index = floor(gaussian_sizes.shape[0] *(1-cull_gauss_size_percent))
 
@@ -232,11 +232,34 @@ class Gaussians():
 
             self.filter_gaussians(culled_gaussians)
 
-    def get_gaussian_sizes(self):
+    def get_gaussian_magnitudes(self, contributions=None):
         """
-        Orders the gaussians by volume size after calculating the exponent (to prioritse larger Gaussians)
+        Orders the gaussians by contributions to the scene
+        Credit: Andrew Morton
         """
-        return torch.sqrt(torch.sum(torch.pow(torch.exp(self.scales * self.scaling_modifier), 2), axis=1))
+
+        # Determine eigenvalues from Gaussians for a, b, c parameters of an ellipsoid
+        eigvals = torch.linalg.eigvals(self.covariances).real
+
+        # Approximate surface area of an ellipsoid (https://en.wikipedia.org/wiki/Ellipsoid)
+        p = 1.6075  
+        a, b, c = eigvals[:, 0], eigvals[:, 1], eigvals[:, 2]
+        a, b, c = torch.sqrt(a), torch.sqrt(b), torch.sqrt(c)   
+
+        radicand = (torch.pow(a*b, p) + torch.pow(a*c, p) + torch.pow(b*c, p)) / 3.0
+        surface_area = 4.0 * torch.pi * torch.pow(radicand, 1.0/p)    
+
+        # Linearly scales number of points 
+        surface_area = torch.sqrt(surface_area)
+        
+        # If contributions not provided, then use the opacities instead
+        if contributions is None:
+            contributions = self.opacities
+
+        # Muliply Gaussians by the contribution/opacity (since Gaussians that are less visible should recieve less points)
+        magitudes = (surface_area * contributions).to(torch.float64)
+
+        return magitudes
 
 
 

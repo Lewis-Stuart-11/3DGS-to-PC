@@ -6,6 +6,7 @@ This repo offers scripts for converting a 3D Gaussian Splatting scene into a den
 
 1) **Technical Paper:** *https://arxiv.org/abs/2501.07478*
 2) **Research Article:** *https://radiancefields.com/3dgs-to-dense-ply*
+3) **Research Article #2:** *https://radiancefields.com/3dgs-to-dense-point-cloud-v2*
 3) **Youtube Video (1):** *https://www.youtube.com/watch?v=cOXfKRFqqxg*
 4) **Youtube Video (2):** *https://www.youtube.com/watch?v=iB1WDiYxkws*
 
@@ -53,31 +54,32 @@ The transform path can either be to a transforms.json file or COLMAP output file
 
 ## Functionality 
 
-| Argument             | Default Value  | Description |
-| :---                 |  :----:      |          ---: |
-| **input_path**       | -            |  Path to ply or splat file to convert to a point cloud |
-| output_path          | 3dgs_pc.ply  |  Path to output file (must be ply file) |
-| **transform_path**   | -            |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
-| renderer_type        | cuda         |  The type of renderer to use for determining point colours (currently supports 'cuda' or 'python') |
-| **num_points**       | 10000000     |  Total number of points to generate for the pointcloud |
-| exact_num_points     | False        |  Set if the number of generated points should more closely match the num_points argument (slower) |
-| visibility_threshold | 0.05         |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise)|
-| clean_pointcloud     | False        |  Set to remove outliers on the point cloud after generation (requires Open3D) |
-| generate_mesh        | False        |  Set to also generate a mesh based on the created point cloud  |
-| poisson_depth        | 10           |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
-| laplacian_iterations | 10           |  The number of iterations to perform laplacian mesh smoothing (higher value = smoother mesh) |
-| mesh_output_path     | 3dgs_mesh.ply|  Path to mesh output file (must be ply file) |
-| camera_skip_rate     | 0            |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
-| no_render_colours    | False        |  Skip rendering colours- faster but colours will be strange |
-| colour_quality       | medium       |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high and ultra |
-| bounding_box_min     | -            |  Values for minimum position of gaussians to include in generating the new point cloud  |
-| bounding_box_max     | -            |  Values for maximum position of gaussians to include in generating the new point cloud  |
-| no_calculate_normals | False        |  Set to not calculate and save normals for the points |  
-| std_distance         | 2.0          |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
-| min_opacity          | 0.0          |  Minimum opacity for gaussians that will be included (must be between 0-1) |
-| cull_gaussian_sizes  | 0.0          |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
-| max_sh_degrees       | 3            |  The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded) |
-| quiet                | False        |  Set to surpress any output print statements
+| Argument                        | Default Value  | Description |
+| :---                            |  :----:        |          ---: |
+| **input_path**                  | -              |  Path to ply or splat file to convert to a point cloud |
+| output_path                     | 3dgs_pc.ply    |  Path to output file (must be ply file) |
+| **transform_path**              | -              |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
+| renderer_type                   | cuda           |  The type of renderer to use for determining point colours (currently supports 'cuda' or 'python') |
+| **num_points**                  | 10000000       |  Total number of points to generate for the pointcloud |
+| exact_num_points                | False          |  Set if the number of generated points should more closely match the num_points argument (slower) |
+| no_prioritise_visible_gaussians | False          |  Gaussians that contribute most to the scene are given more points- set to turn this off |
+| visibility_threshold            | 0.05           |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise) |
+| clean_pointcloud                | False          |  Set to remove outliers on the point cloud after generation (requires Open3D) |
+| generate_mesh                   | False          |  Set to also generate a mesh based on the created point cloud  |
+| poisson_depth                   | 10             |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
+| laplacian_iterations            | 10             |  The number of iterations to perform laplacian mesh smoothing (higher value = smoother mesh) |
+| mesh_output_path                | 3dgs_mesh.ply  |  Path to mesh output file (must be ply file) |
+| camera_skip_rate                | 0              |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
+| no_render_colours               | False          |  Skip rendering colours- faster but colours will be strange |
+| colour_quality                  | medium         |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high and ultra |
+| bounding_box_min                | -              |  Values for minimum position of gaussians to include in generating the new point cloud  |
+| bounding_box_max                | -              |  Values for maximum position of gaussians to include in generating the new point cloud  |
+| no_calculate_normals            | False          |  Set to not calculate and save normals for the points |  
+| std_distance                    | 2.0            |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
+| min_opacity                     | 0.0            |  Minimum opacity for gaussians that will be included (must be between 0-1) |
+| cull_gaussian_sizes             | 0.0            |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
+| max_sh_degrees                  | 3              |  The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded) |
+| quiet                           | False          |  Set to surpress any output print statements
 
 ## Tips
 
@@ -97,7 +99,7 @@ For generating a more accurate mesh, we recommend checking out [SuGaR](https://a
 
 ### Speed
 There are several ways that rendering speed can be increased without substantially impacting the final quality of the point cloud:
-1) Set ```camera_skip_rate``` to a value where overlapping images are not rendered (e.g. we set camera_skip_rate = 4 for the mip dataset). Only do this if the camera poses are ordered in a linear trajectory around your scene and the camera poses overlap considerably.
+1) Set ```camera_skip_rate``` to a value where overlapping images are not rendered (e.g. we set camera_skip_rate = 4 for the mip dataset). Only do this if the camera poses are ordered in a linear trajectory around your scene and the camera poses overlap considerably. This can also have an impact in the point distribution quality
 2) Set ```colour_quality``` to a lower option. This value is used to determine what resolution to render images of the scene; a lower quality will result in a faster render time.
 
 If you are using the Python renderer, consider using the CUDA renderer instead, as it is much more efficient!

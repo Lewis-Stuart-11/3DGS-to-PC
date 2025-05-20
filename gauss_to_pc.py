@@ -39,6 +39,7 @@ class GaussPointCloudSettings(NamedTuple):
     """
     renderer_type: str
     num_points: int
+    prioritise_visible_gaussians: bool
     std_distance: float
     camera_skip_rate: int
     render_colours: bool 
@@ -248,7 +249,8 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
 
     return new_points, new_colours, new_normals
 
-def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=False, calculate_normals=True, num_sample_attempts=5, device="cuda:0", quiet=False):
+def generate_pointcloud(gaussians, num_points, contributions=None, std_distance=2, exact_num_points=False, calculate_normals=True, 
+                                               num_sample_attempts=5, device="cuda:0", quiet=False):
 
     """
     Generates a pointcloud from a set of gaussians
@@ -269,7 +271,7 @@ def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=
     """
 
     # Calculate Gaussian sizes
-    gaussian_sizes = gaussians.get_gaussian_sizes()
+    gaussian_sizes = gaussians.get_gaussian_magnitudes(contributions=contributions)
 
     if not quiet:
         print(f"Distributed Points to Gaussians")
@@ -343,7 +345,6 @@ def generate_pointcloud(gaussians, num_points, std_distance=2, exact_num_points=
 
     return total_points, total_colours, total_normals
 
-
 def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     """
     Generates a pointcloud from a 3DGS file
@@ -383,6 +384,8 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     gaussians.apply_min_opacity(pointcloud_settings.min_opacity)
     gaussians.apply_bounding_box(pointcloud_settings.bounding_box_min, pointcloud_settings.bounding_box_max)
     gaussians.cull_large_gaussians(pointcloud_settings.cull_large_percentage)
+
+    total_gaussian_contributions = None
 
     # Rendered colours has been set 
     if pointcloud_settings.render_colours:
@@ -429,7 +432,17 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
 
         # Get the predicted surface Gaussians
         if pointcloud_settings.generate_mesh:
-            surface_gaussian_idxs = gaussian_renderer.get_surface_gaussians()[gaussian_renderer.get_seen_gaussians()] 
+            surface_gaussian_idxs = gaussian_renderer.get_predicted_surface_gaussians()
+
+            if pointcloud_settings.remove_unrendered_gaussians:
+                surface_gaussian_idxs = surface_gaussian_idxs[gaussian_renderer.get_seen_gaussians()] 
+
+        # Get total contributions of each Gaussian over all images (used for smart point generation)
+        if pointcloud_settings.prioritise_visible_gaussians:
+            total_gaussian_contributions = gaussian_renderer.get_total_gaussian_contributions()
+        
+            if pointcloud_settings.remove_unrendered_gaussians: 
+                total_gaussian_contributions = total_gaussian_contributions[gaussian_renderer.get_seen_gaussians()] 
 
         del gaussian_renderer
     
@@ -458,9 +471,10 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
     # Generate points for the point cloud of the entire scene
     points, colours, normals = generate_pointcloud(gaussians, pointcloud_settings.num_points, exact_num_points=pointcloud_settings.exact_num_points, 
                                                                                               std_distance = pointcloud_settings.std_distance, 
-                                                                                              device=pointcloud_settings.device, 
                                                                                               calculate_normals=pointcloud_settings.calculate_normals,
                                                                                               num_sample_attempts=num_sample_attempts,
+                                                                                              contributions=total_gaussian_contributions,
+                                                                                              device=pointcloud_settings.device, 
                                                                                               quiet=pointcloud_settings.quiet)
 
     total_point_cloud = PointCloudData(
@@ -489,9 +503,10 @@ def convert_3dgs_to_pc(input_path, transform_path, pointcloud_settings):
         # Or half the number of points set by the user 
         total_mesh_points = min(pointcloud_settings.num_points//2, int(gaussians.xyz.shape[0]*avg_points_per_gauss_for_mesh))
 
-        # Generate points for the point cloud of the entire scene
+        # Generate points for the point cloud of the mesh
         points, colours, normals = generate_pointcloud(gaussians, total_mesh_points, exact_num_points=pointcloud_settings.exact_num_points, 
                                                                                      num_sample_attempts=num_sample_attempts,
+                                                                                     contributions=total_gaussian_contributions,
                                                                                      device=pointcloud_settings.device,
                                                                                      quiet=pointcloud_settings.quiet)
 
@@ -522,6 +537,7 @@ def config_parser():
 
     parser.add_argument("--num_points", type=int, default=10000000, help="Total number of points to generate for the pointcloud")
     parser.add_argument("--exact_num_points", action="store_true", help="Set if the number of generated points should more closely match the num_points argument (slower)")
+    parser.add_argument("--no_prioritise_visible_gaussians", action="store_true", help="Gaussians that contribute most to the scene are given more points- set to turn this off")
 
     parser.add_argument("--visibility_threshold", type=float, default=0.05, help="Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise)")
     parser.add_argument("--clean_pointcloud", action="store_true", help="Set to remove outliers on the point cloud after generation (requires Open3D)")
@@ -613,6 +629,7 @@ def main():
     pointcloud_settings = GaussPointCloudSettings(
         renderer_type=args.renderer_type,
         num_points=args.num_points,
+        prioritise_visible_gaussians=not args.no_prioritise_visible_gaussians,
         std_distance=args.std_distance,
         camera_skip_rate=args.camera_skip_rate,
         render_colours=not args.no_render_colours,
@@ -640,6 +657,7 @@ def main():
             print("Cleaning Point Cloud")
 
         from mesh_handler import clean_point_cloud
+
 
         # Clean point cloud using Open3D
         cleaned_points, cleaned_colours, cleaned_normals = clean_point_cloud(total_point_cloud.points, total_point_cloud.colours, 

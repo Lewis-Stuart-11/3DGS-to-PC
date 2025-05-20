@@ -57,9 +57,13 @@ class GaussianRasterizer(nn.Module):
         # Tensor of the maximum contributions each Gaussian made 
         self.gaussian_max_contribution = torch.zeros(means3D.shape[0], device=self.device, dtype=torch.float)
 
+        # Tensor of total contributions of each Gaussian
+        self.gaussian_total_contribution = torch.zeros(means3D.shape[0], device=self.device, dtype=torch.float)
+
         # Tensor of new Gaussian colours calculated for point cloud generation
         self.gaussian_colours = torch.zeros((means3D.shape[0], 3), device=self.device, dtype=torch.float)
 
+        # Value to filter low visbility Gaussians
         self.visible_gaussian_threshold = visible_gaussian_threshold
 
     """def markVisible(self, positions):
@@ -126,27 +130,47 @@ class GaussianRasterizer(nn.Module):
         self.gaussian_max_contribution[gaussians_to_update] = new_gauss_contributions[gaussians_to_update]
         self.gaussian_colours[gaussians_to_update] = new_gauss_colours[gaussians_to_update]
 
+        self.gaussian_total_contribution += new_gauss_contributions
+
     def get_gaussian_colours(self):
         """ 
         Returns the new calculated Gaussian colours 
         """
         return self.gaussian_colours * 255
 
+    def get_max_gaussian_contributions(self):
+        """
+        Returns the maximum contributions that each Gaussian made to a pixel
+        """
+        return self.gaussian_max_contribution
+
+    def get_total_gaussian_contributions(self):
+        """
+        Returns the total contributions that each Gaussian made to every rendered image
+        """
+        return self.gaussian_total_contribution
+
     def get_gaussians_above_contribution_threshold(self, contribution_threshold):
         """ 
-        Returns indices of Gaussians that have a contribution above a given threshold
+        Returns mask of Gaussians that have a contribution above a given threshold
         """
-        return self.gaussian_max_contribution > contribution_threshold
+        return self.get_max_gaussian_contributions() > contribution_threshold
+
+    def get_gaussians_above_total_contribution_threshold(self, contribution_threshold):
+        """ 
+        Returns mask of Gaussians that have a contribution above a given threshold
+        """
+        return self.get_total_gaussian_contributions() > contribution_threshold
 
     def get_seen_gaussians(self):
         """ 
-        Returns indices of Gaussians that have been rendered 
+        Returns mask of Gaussians that have been rendered 
         """
         return self.get_gaussians_above_contribution_threshold(self.visible_gaussian_threshold)
 
-    def get_surface_gaussians(self):
+    def get_predicted_surface_gaussians(self):
         """
-        Returns indices of Gaussians that are predicted to be on the surface of the scene
+        Returns mask of Gaussians that are predicted to be on the surface of the scene
         """
-        return self.get_gaussians_above_contribution_threshold(torch.mean(self.gaussian_max_contribution))
+        return self.get_gaussians_above_contribution_threshold(torch.mean(self.get_max_gaussian_contributions()))
 
