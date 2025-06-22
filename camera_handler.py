@@ -50,8 +50,15 @@ class Camera():
         self.full_proj_transform = self.world_view_transform @ self.projection_matrix
 
 
-def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920, sh_degree=3):
-    diff = colour_resolution / int(cam_intrinsic[0])
+def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=None, sh_degree=3, white_bkgd=True, mask=None):
+
+    diff = 1 if (colour_resolution is None or mask is not None) else colour_resolution / int(cam_intrinsic[0])
+
+    if mask is not None:
+
+        if mask.shape[1] != int(cam_intrinsic[0]) or mask.shape[0] != int(cam_intrinsic[1]):
+            raise Exception("Size of mask must match size of input image")
+        mask = mask.flatten()
 
     img_width = int(int(cam_intrinsic[0]) * diff) 
     img_height = int(int(cam_intrinsic[1]) * diff) 
@@ -74,7 +81,6 @@ def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920, 
         tanfovy = math.tan(fovY * 0.5)
 
         scaling_modifier = 1.0
-        white_bkgd = True
         
         znear = 10
         zfar = 100
@@ -96,6 +102,7 @@ def get_camera(renderer_type, transform, cam_intrinsic, colour_resolution=1920, 
             projmatrix=viewmatrix @ projmatrix,
             sh_degree=sh_degree,
             prefiltered=False,
+            mask=mask,
             debug=True,
             antialiasing=False
         )

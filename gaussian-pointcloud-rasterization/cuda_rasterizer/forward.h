@@ -61,10 +61,14 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
+		float* out_depth,
 		float* depths,
 		float* depth,
 		float* gauss_contributions,
-		int* gauss_pixels);
+		float * gauss_surface_distances,
+		int* gauss_pixels,
+		int* mask,
+		bool calculate_surface_distance);
 }
 
 

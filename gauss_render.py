@@ -219,6 +219,7 @@ class GaussPythonRenderer():
 
         # Tensor of the maximum contributions each Gaussian made 
         self.gaussian_max_contribution = torch.zeros(means3D.shape[0], device=self.device)
+        self.gaussian_total_contribution = torch.zeros(means3D.shape[0], device=self.device)
 
         # Tensor of new Gaussian colours calculated for point cloud generation
         self.gaussian_colours = torch.zeros((means3D.shape[0], 3), device=self.device, dtype=torch.double)
@@ -245,7 +246,7 @@ class GaussPythonRenderer():
         """
         return self.gaussian_max_contribution > contribution_threshold
 
-    def get_seen_gaussians(self):
+    def get_visible_gaussians(self):
         """ 
         Returns indices of Gaussians that have been rendered 
         """
@@ -256,6 +257,11 @@ class GaussPythonRenderer():
         Returns indices of Gaussians that are predicted to be on the surface of the scene
         """
         return self.get_gaussians_above_contribution_threshold(torch.mean(self.gaussian_max_contribution))
+
+    def get_total_gaussian_contributions(self):
+
+        # TODO: FIX TO SUPPORT CONTRIBUTIONS ACROSS ALL IMAGE (NOT MAX)
+        return self.gaussian_max_contribution
 
     def render(self, camera, means2D, cov2d, colour, opacity, depths, projection_mask, max_tile_size=60, max_gaussians_per_tile=60000):
         """
@@ -393,7 +399,7 @@ class GaussPythonRenderer():
                 surface_gaussians_to_update = indices_in_mask[biggest_contribution_per_pixel]
                 self.surface_gaussian_idxs[surface_gaussians_to_update] += 1"""
 
-            return torch.flip(render_colour, [1,]), None, None
+            return torch.flip(render_colour, [1,]), None, None, None
 
     def __call__(self, camera, **kwargs):
         """
@@ -458,7 +464,9 @@ class GaussPythonRenderer():
 
             raise Exception("Failed to render image")
 
-def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, shs=None, visible_gaussian_threshold=0.0):
+def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, shs=None, visible_gaussian_threshold=0.0, 
+                 surface_distance_std=None, calculate_surface_distance=False):
+
     if renderer_type == "cuda":
         try:
             from gaussian_pointcloud_rasterization import GaussianRasterizer as GaussianPCRasterizer
@@ -470,11 +478,13 @@ def get_renderer(renderer_type: str, xyz, opacities, colours, covariances, shs=N
         if shs is None:
             return GaussianPCRasterizer(xyz.to(torch.float), means2D, opacities.type(torch.float),
                                         colors_precomp=colours.to(torch.float), cov3D_precomp=strip_symmetric(covariances).to(torch.float),
-                                        visible_gaussian_threshold=visible_gaussian_threshold)
+                                        visible_gaussian_threshold=visible_gaussian_threshold, surface_distance_std=surface_distance_std, 
+                                        calculate_surface_distance=calculate_surface_distance)
         else:
             return GaussianPCRasterizer(xyz.to(torch.float), means2D, opacities.type(torch.float),
                                         shs=shs.to(torch.float), cov3D_precomp=strip_symmetric(covariances).to(torch.float),
-                                        visible_gaussian_threshold=visible_gaussian_threshold)
+                                        visible_gaussian_threshold=visible_gaussian_threshold, surface_distance_std=surface_distance_std, 
+                                        calculate_surface_distance=calculate_surface_distance)
 
     elif renderer_type == "python":
         return GaussPythonRenderer(xyz, opacities.type(torch.float), colours, covariances, 

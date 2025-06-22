@@ -160,6 +160,8 @@ def load_colmap_bin_data(input_path, skip_rate=0):
             )
 
             if i % (skip_rate + 1) == 0:
+                name = os.path.basename(str(name)).split('.')[0]
+
                 colmap_transforms[name] = transform
                 transform_cameras[name] = colmap_cameras[camera_id]
 
@@ -199,7 +201,7 @@ def load_colmap_txt_data(input_path, skip_rate=0):
                     elems = line.split(" ")
 
                     camera_id = int(elems[8])
-                    name = str(elems[9])
+                    name = os.path.basename(str(elems[9])).split('.')[0]
 
                     transform = get_colmap_img_transform(elems)
 
@@ -262,6 +264,8 @@ def load_transform_json_data(input_path, skip_rate=0):
     for i, frame in enumerate(transforms["frames"]):
         fname = os.path.basename(frame["file_path"])
         transform = frame["transform_matrix"]
+
+        fname = os.path.basename(str(fname)).split('.')[0]
 
         if all_intrinsics is None:
             intrinsics[fname] = get_transform_intrinsics(frame, frame["file_path"])

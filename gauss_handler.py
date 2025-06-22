@@ -81,6 +81,11 @@ class Gaussians():
         # Calculates 3D covariance matrices
         self.covariances = build_covariance_from_scaling_rotation(scales, self.scaling_modifier, rots)
 
+        self.set_default_filter()
+
+    def set_default_filter(self):
+        self.filter_indices = torch.full((self.xyz.shape[0],), True, dtype=torch.bool, device=torch.device(f"cuda:{self.xyz.get_device()}")) 
+
     def calculate_normals(self):
         """
         Determines the normal of each Gaussian by determining the smallest side
@@ -155,12 +160,20 @@ class Gaussians():
         # If still not positive-definite then delete erroneous Gaussians
         non_positive_covariances = self.non_posdef_covariances(self.covariances, epsilon=min_ps_epsilon)
         if non_positive_covariances.sum() > 0:
-            self.filter_gaussians(~non_positive_covariances)
+            self.add_gaussians_to_cull(~non_positive_covariances)
+            self.filter_gaussians()
 
-    def filter_gaussians(self, filter_indices):
+        return ~non_positive_covariances
+
+    def add_gaussians_to_cull(self, indices_to_cull):
+        self.filter_indices = self.filter_indices & indices_to_cull
+
+    def filter_gaussians(self):
         """
         Filters gaussians based on given indices
         """
+
+        filter_indices = torch.clone(self.filter_indices)
 
         self.xyz = self.xyz[filter_indices]
         self.scales = self.scales[filter_indices]
@@ -175,6 +188,10 @@ class Gaussians():
         if self.normals is not None:
             self.normals = self.normals[filter_indices]
 
+        self.set_default_filter()
+
+        return filter_indices
+
     def apply_min_opacity(self, min_opacity):
         """
         Removes gaussians with opacity lower than the min_opacity
@@ -183,7 +200,7 @@ class Gaussians():
         if min_opacity > 0.0:
             valid_gaussians_indices = self.opacities > (min_opacity)
 
-            self.filter_gaussians(valid_gaussians_indices)
+            self.filter_indices = self.filter_indices & valid_gaussians_indices
 
     def apply_bounding_box(self, bounding_box_min, bounding_box_max):
         """
@@ -204,7 +221,7 @@ class Gaussians():
 
             valid_gaussians_indices = valid_gaussians_indices & bounding_box_max_indices
 
-        self.filter_gaussians(valid_gaussians_indices)
+        self.filter_indices = self.filter_indices & valid_gaussians_indices
 
     """def apply_k_nearest_neighbours(self, k=10):
         tree = KDTree(self.xyz.detach().cpu().numpy())
@@ -230,7 +247,7 @@ class Gaussians():
 
             culled_gaussians = sorted_indices[:cull_index]
 
-            self.filter_gaussians(culled_gaussians)
+            self.filter_indices = self.filter_indices & culled_gaussians
 
     def get_gaussian_magnitudes(self, contributions=None):
         """

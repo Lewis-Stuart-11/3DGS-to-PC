@@ -63,7 +63,8 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | **num_points**                  | 10000000       |  Total number of points to generate for the pointcloud |
 | exact_num_points                | False          |  Set if the number of generated points should more closely match the num_points argument (slower) |
 | no_prioritise_visible_gaussians | False          |  Gaussians that contribute most to the scene are given more points- set to turn this off |
-| visibility_threshold            | 0.05           |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (larger value = less noise) |
+| visibility_threshold            | 0.05           |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (smaller value = less noise) |
+| surface_distance_std            | None           | Cull Gaussians that are a minimum of X standard deviations away from the predicted scene surfaces (smaller value = less noise) |
 | clean_pointcloud                | False          |  Set to remove outliers on the point cloud after generation (requires Open3D) |
 | generate_mesh                   | False          |  Set to also generate a mesh based on the created point cloud  |
 | poisson_depth                   | 10             |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
@@ -71,11 +72,11 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | mesh_output_path                | 3dgs_mesh.ply  |  Path to mesh output file (must be ply file) |
 | camera_skip_rate                | 0              |  Number of cameras to skip for each rendered image (reduces compute time- only use if cameras in linear trajectory) |
 | no_render_colours               | False          |  Skip rendering colours- faster but colours will be strange |
-| colour_quality                  | medium         |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high and ultra |
+| colour_quality                  | high         |  The quality of the colours when generating the point cloud (more quality = slower processing time). Avaliable options are: tiny, low, medium, high, ultra and original |
 | bounding_box_min                | -              |  Values for minimum position of gaussians to include in generating the new point cloud  |
 | bounding_box_max                | -              |  Values for maximum position of gaussians to include in generating the new point cloud  |
 | no_calculate_normals            | False          |  Set to not calculate and save normals for the points |  
-| std_distance                    | 2.0            |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
+| mahalanobis_distance_std        | 2.0            |  Maximum Mahalanobis distance each point can be from the centre of their gaussian |
 | min_opacity                     | 0.0            |  Minimum opacity for gaussians that will be included (must be between 0-1) |
 | cull_gaussian_sizes             | 0.0            |  The percentage of gaussians to remove from largest to smallest (must be between 0-1) |
 | max_sh_degrees                  | 3              |  The number spherical harmonics of the loaded point cloud (default 3- change if different number of spherical harmonics are loaded) |
@@ -84,9 +85,11 @@ The transform path can either be to a transforms.json file or COLMAP output file
 ## Tips
 
 ### Noise 
-If you are experiencing a lot of noise in the final point cloud, we recommend increasing the ```visibility_threshold``` argument to a higher value. This means that Gaussians that contribute less to the rendered images will be removed (which typically represents noise)
+If you are experiencing a lot of noise in the final point cloud, we recommend increasing the ```visibility_threshold``` argument to a higher value. This means that Gaussians that contribute less to the rendered images will be removed (which typically represents noise).
 
-Furthermore, the ```clean_pointcloud``` will reduce noisy points using a statistical outlier removal algorithm (although this requires Open3D).
+Another approach is to set the ```surface_distance_std``` to a value, which will cull Gaussians that have a minimum distance to a predicted surface above a certain threshold, meaning that Gaussians far away from scene surfaces are removed. Decreasing the value will increase the harshness of the culling algorithm.
+
+Finally, the ```clean_pointcloud``` will reduce noisy points using a statistical outlier removal algorithm (although this requires Open3D).
 
 ### Meshing
 

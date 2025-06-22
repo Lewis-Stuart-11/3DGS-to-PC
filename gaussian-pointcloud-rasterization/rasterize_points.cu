@@ -23,6 +23,7 @@
 #include <fstream>
 #include <string>
 #include <functional>
+#include <limits>
 
 std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     auto lambda = [&t](size_t N) {
@@ -32,7 +33,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -51,8 +52,10 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
+	const torch::Tensor& mask,
 	const bool prefiltered,
 	const bool antialiasing,
+	const bool calculate_surface_distance,
 	const bool debug)
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
@@ -77,9 +80,14 @@ RasterizeGaussiansCUDA(
 
   // The maximum contribution that each Gaussian made to the final pixel
   torch::Tensor gauss_contributions = torch::full({P}, 0.f, means3D.options().dtype(torch::kFloat32));
+
+  // The minimum distance from each Gaussian to the predicted surface
+  torch::Tensor gauss_surface_distances = torch::full({P}, std::numeric_limits<float>::max(), means3D.options().dtype(torch::kFloat32));
   
   // The ID of the pixel that each Gaussian contributed the most to
   torch::Tensor gauss_pixels = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
+
+  torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
 
   torch::Device device(torch::kCUDA);
   torch::TensorOptions options(torch::kByte);
@@ -121,15 +129,19 @@ RasterizeGaussiansCUDA(
 		tan_fovy,
 		prefiltered,
 		out_color.contiguous().data<float>(),
+		out_depth.contiguous().data<float>(),
 		out_invdepthptr,
 		antialiasing,
 		gauss_contributions.contiguous().data<float>(),
+		gauss_surface_distances.contiguous().data<float>(),
 		gauss_pixels.contiguous().data<int>(),
+		mask.contiguous().data<int>(),
 		radii.contiguous().data<int>(),
+		calculate_surface_distance,
 		debug);
   }
 
-  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth, gauss_contributions, gauss_pixels);
+  return std::make_tuple(rendered, out_color, out_depth, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth, gauss_contributions, gauss_surface_distances, gauss_pixels);
 }
 
 torch::Tensor markVisible(

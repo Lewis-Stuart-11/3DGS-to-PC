@@ -25,19 +25,41 @@ def load_ply_data(path, max_sh_degree=3):
 
     opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
 
-    features_dc = np.zeros((xyz.shape[0], 3, 1))
-    features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
-    features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
-    features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+    if "f_dc_0" in plydata.elements[0]:
 
-    extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
-    extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
-    assert len(extra_f_names)==3*(max_sh_degree + 1) ** 2 - 3
-    features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
-    for idx, attr_name in enumerate(extra_f_names):
-        features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        features_dc = np.zeros((xyz.shape[0], 3, 1))
+        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
 
-    features_extra = features_extra.reshape((features_extra.shape[0], 3, (max_sh_degree + 1) ** 2 - 1))
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(max_sh_degree + 1) ** 2 - 3
+        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        features_extra = features_extra.reshape((features_extra.shape[0], 3, (max_sh_degree + 1) ** 2 - 1))
+
+        features_all = torch.cat((torch.tensor(features_dc, device="cuda:0"), torch.tensor(features_extra, device="cuda:0")), 2)
+
+        colours = computeColorFromLowDegSH(features_all)
+    
+    elif "red" in plydata.elements[0]:
+
+        colours = torch.zeros((xyz.shape[0], 3), device="cuda:0", dtype=torch.double)
+        colours[:, 0] = torch.tensor(plydata.elements[0]["red"], device="cuda:0", dtype=torch.double)
+        colours[:, 1] = torch.tensor(plydata.elements[0]["green"], device="cuda:0", dtype=torch.double)
+        colours[:, 2] = torch.tensor(plydata.elements[0]["blue"], device="cuda:0", dtype=torch.double)
+
+        if torch.count_nonzero(colours > 1.0) > 0:
+            colours /= 255
+            colours = colours.clip(0,1)
+        
+        features_all = None
+
+    else:
+        raise AttributeError("Input ply file does not have valid colours (must have either spherical harmoics or RGB colour fields)") 
 
     scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
     scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
@@ -50,10 +72,6 @@ def load_ply_data(path, max_sh_degree=3):
     rots = np.zeros((xyz.shape[0], len(rot_names)))
     for idx, attr_name in enumerate(rot_names):
         rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
-
-    features_all = torch.cat((torch.tensor(features_dc, device="cuda:0"), torch.tensor(features_extra, device="cuda:0")), 2)
-
-    colours = computeColorFromLowDegSH(features_all)
 
     opacities = (1 / (1 + torch.exp(torch.tensor(-opacities, device="cuda:0")))).type(torch.float).squeeze(1) # torch.full(opacities.shape, 0.05, device="cuda:0")-
 

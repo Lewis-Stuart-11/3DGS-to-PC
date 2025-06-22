@@ -15,6 +15,8 @@
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
+#define FLOAT_MAX 3.402823466e+38F
+
 // Forward method for converting the input spherical harmonics
 // coefficients of each Gaussian to a simple RGB color.
 __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
@@ -281,6 +283,20 @@ __device__ static float atomicMax(float* address, float val)
     return __int_as_float(old);
 }
 
+// Atomic Min of two float values
+__device__ static float atomicMin(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fminf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
+
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
@@ -297,10 +313,14 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
+	float* __restrict__ out_depth,
 	const float* __restrict__ depths,
 	float* __restrict__ invdepth,
 	float* __restrict__ gauss_contributions,
-	int* __restrict__ gauss_pixels)
+	float* __restrict__ gauss_surface_distances,
+	int* __restrict__ gauss_pixels,
+	int* __restrict__ mask,
+	bool calculate_surface_distance)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -310,6 +330,8 @@ renderCUDA(
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
+
+	int mask_pixel = mask[W * pix.y + pix.x];
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -329,12 +351,15 @@ renderCUDA(
 	__shared__ float largest_collected_contributions[BLOCK_SIZE];
 	__shared__ uint32_t largest_collected_contribution_pixel[BLOCK_SIZE]; 
 
+	__shared__ float smallest_collected_surface_distance[BLOCK_SIZE]; 
+
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
 
+	float expected_depth = 0.0f;
 	float expected_invdepth = 0.0f;
 
 	// Iterate over batches until all done or range is complete
@@ -356,8 +381,13 @@ renderCUDA(
 
 			largest_collected_contributions[block.thread_rank()] = 0.0f;
 			largest_collected_contribution_pixel[block.thread_rank()] = -1;
+
+			smallest_collected_surface_distance[block.thread_rank()] = FLOAT_MAX;
 		}
 		block.sync();
+
+		if(mask_pixel == 0)
+			break;
 
 		// Iterate over current batch
 		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
@@ -393,21 +423,18 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
 			if(invdepth)
-			expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
+				expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
 			
 			float current_contribution = (alpha * T);
-			
-			// Old method- not secure for parallelism
-			/*if(current_contribution > largest_collected_contributions[j]){
-				largest_collected_contributions[j] = current_contribution;
-				largest_collected_contribution_pixel[j] = pix_id;
-			}*/
+
+			expected_depth += depths[collected_id[j]] * current_contribution;
 			
 			// Take max of current contribution and recorded largest contribution for gaussian. If the old value is smaller,
 			// then it means that this is the largest contribution, so update pixel id to current pixel
-			float old_contribution = atomicMax((float*)&largest_collected_contributions[j], current_contribution);
-			if (current_contribution > old_contribution) {
-				largest_collected_contribution_pixel[j] = pix_id;
+			if(mask_pixel != 0){
+				float old_contribution = atomicMax((float*)&largest_collected_contributions[j], current_contribution);
+				if (current_contribution > old_contribution)
+					largest_collected_contribution_pixel[j] = pix_id;
 			}
 
 			T = test_T;
@@ -419,19 +446,43 @@ renderCUDA(
 
 		if (range.x + progress < range.y)
 		{
-			// Update gaussian contributions using parallelism (via block thread ID)
+
 			if(largest_collected_contributions[block.thread_rank()] > gauss_contributions[collected_id[block.thread_rank()]]){
 				gauss_contributions[collected_id[block.thread_rank()]] = largest_collected_contributions[block.thread_rank()];
 				gauss_pixels[collected_id[block.thread_rank()]] = largest_collected_contribution_pixel[block.thread_rank()];
 			}
+			//else
+			//	gauss_contributions[collected_id[block.thread_rank()]] = 0.0f;
 		}
+
 		block.sync();
+
+		if(calculate_surface_distance){
+			
+			// Iterate over current batch (again) and calculate distance from each Gaussian to the depth
+			for (int j = 0; j < min(BLOCK_SIZE, toDo); j++)
+			{
+				float current_gaussian_distance =  fabsf(depths[collected_id[j]] - expected_depth);
+
+				if(current_gaussian_distance < smallest_collected_surface_distance[j])
+					smallest_collected_surface_distance[j] = current_gaussian_distance;
+
+				//float old_distance = atomicMin((float*)&smallest_collected_surface_distance[j], current_gaussian_distance);
+			}
+
+			// If Gaussian has current lowest distance to the depth, then update this value
+			if (range.x + progress < range.y)
+				if(smallest_collected_surface_distance[block.thread_rank()] < gauss_surface_distances[collected_id[block.thread_rank()]])
+					gauss_surface_distances[collected_id[block.thread_rank()]] = smallest_collected_surface_distance[block.thread_rank()];
+		}
+
+		block.sync();
+		
 	}
 
 	// All threads that treat valid pixel write out their final
 	// rendering data to the frame and auxiliary buffers.
-	if (inside)
-	{
+	if (inside & mask_pixel != 0){
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
@@ -439,7 +490,10 @@ renderCUDA(
 
 		if (invdepth)
 			invdepth[pix_id] = expected_invdepth;// 1. / (expected_depth + T * 1e3);
+
+		out_depth[pix_id] = expected_depth;//expected_depth;
 	}
+
 }
 
 
@@ -455,10 +509,14 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
+	float* out_depth,
 	float* depths,
 	float* depth,
 	float* gauss_contributions,
-	int* gauss_pixels)
+	float* gauss_surface_distances,
+	int* gauss_pixels,
+	int* mask,
+	bool calculate_surface_distance)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -471,10 +529,14 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
+		out_depth,
 		depths, 
 		depth,
 		gauss_contributions,
-		gauss_pixels);
+		gauss_surface_distances,
+		gauss_pixels,
+		mask,
+		calculate_surface_distance);
 }
 
 void FORWARD::preprocess(int P, int D, int M,

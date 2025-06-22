@@ -29,12 +29,14 @@ class GaussianRasterizationSettings(NamedTuple):
     projmatrix : torch.Tensor
     sh_degree : int
     campos : torch.Tensor
+    mask: torch.tensor
     prefiltered : bool
     debug : bool
     antialiasing : bool
 
 class GaussianRasterizer(nn.Module):
-    def __init__(self,  means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None, visible_gaussian_threshold=0.0):
+    def __init__(self,  means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, 
+                cov3D_precomp = None, visible_gaussian_threshold=0.0, surface_distance_std=None, calculate_surface_distance=False):
         super().__init__()
 
         if (shs is None and colors_precomp is None) or (shs is not None and colors_precomp is not None):
@@ -52,10 +54,12 @@ class GaussianRasterizer(nn.Module):
         self.rotations = rotations if rotations is not None else torch.Tensor([])
         self.cov3D_precomp = cov3D_precomp if cov3D_precomp is not None else torch.Tensor([])
 
-        self.device = means3D.get_device()
+        self.device = torch.device(f"cuda:{means3D.get_device()}")
 
         # Tensor of the maximum contributions each Gaussian made 
         self.gaussian_max_contribution = torch.zeros(means3D.shape[0], device=self.device, dtype=torch.float)
+
+        self.gaussian_min_surface_distance = torch.full((means3D.shape[0],), torch.finfo(torch.float).max, device=self.device, dtype=torch.float) 
 
         # Tensor of total contributions of each Gaussian
         self.gaussian_total_contribution = torch.zeros(means3D.shape[0], device=self.device, dtype=torch.float)
@@ -65,6 +69,12 @@ class GaussianRasterizer(nn.Module):
 
         # Value to filter low visbility Gaussians
         self.visible_gaussian_threshold = visible_gaussian_threshold
+
+        # Whether or not to calculate the distance of Gaussians the predicted depth
+        self.surface_distance_std = surface_distance_std
+
+        # Set to calculate surface distance
+        self.calculate_surface_distance = calculate_surface_distance
 
     """def markVisible(self, positions):
         # Mark visible points (based on frustum culling for camera) with a boolean 
@@ -81,6 +91,11 @@ class GaussianRasterizer(nn.Module):
         """
         Render new image and calculate Gaussian contributions
         """
+
+        if raster_settings.mask is None:
+            mask = torch.full((raster_settings.image_height * raster_settings.image_width,), 1, device=self.device, dtype=torch.int)
+        else:
+            mask = raster_settings.mask
 
         args = (
             raster_settings.bg, 
@@ -100,13 +115,15 @@ class GaussianRasterizer(nn.Module):
             self.shs,
             raster_settings.sh_degree,
             raster_settings.campos,
+            mask,
             raster_settings.prefiltered,
             raster_settings.antialiasing,
-            raster_settings.debug
+            self.calculate_surface_distance,
+            raster_settings.debug,
         )
 
         # Invoke C++/CUDA rasterizer
-        num_rendered, colour, radii, geomBuffer, binningBuffer, imgBuffer, invdepths, current_gauss_contributions, current_gauss_pixels = _C.rasterize_gaussians(*args)
+        num_rendered, colour, depths, radii, geomBuffer, binningBuffer, imgBuffer, invdepths, current_gauss_contributions, current_gauss_surface_distances, current_gauss_pixels = _C.rasterize_gaussians(*args)
 
         colour_flat = colour.permute(1,2,0).contiguous().view(-1, 3)
 
@@ -118,7 +135,9 @@ class GaussianRasterizer(nn.Module):
         # Update contributions
         self.update_max_contributions(current_gauss_contributions, current_gauss_colours)
 
-        return colour, radii, invdepths
+        self.update_min_surface_distances(current_gauss_surface_distances)
+
+        return colour, radii, invdepths, depths
 
     def update_max_contributions(self, new_gauss_contributions, new_gauss_colours):
         """ 
@@ -131,6 +150,12 @@ class GaussianRasterizer(nn.Module):
         self.gaussian_colours[gaussians_to_update] = new_gauss_colours[gaussians_to_update]
 
         self.gaussian_total_contribution += new_gauss_contributions
+
+    def update_min_surface_distances(self, new_gauss_surface_distances):
+
+        gaussians_to_update = new_gauss_surface_distances < self.gaussian_min_surface_distance 
+
+        self.gaussian_min_surface_distance[gaussians_to_update] = new_gauss_surface_distances[gaussians_to_update]
 
     def get_gaussian_colours(self):
         """ 
@@ -158,19 +183,39 @@ class GaussianRasterizer(nn.Module):
 
     def get_gaussians_above_total_contribution_threshold(self, contribution_threshold):
         """ 
-        Returns mask of Gaussians that have a contribution above a given threshold
+        Returns mask of Gaussians that have a total contribution above a given threshold
         """
         return self.get_total_gaussian_contributions() > contribution_threshold
 
-    def get_seen_gaussians(self):
+    def get_surface_gaussians_below_distance_threshold(self, surface_distance_threshold):
+        """
+        Returns mask of Gaussians with the lowest surface distance below a given threshold
+        """
+        if not self.calculate_surface_distance:
+            raise Exception("Cannot determine Gaussian surface distance as this feature was not set at the start of rendering")
+
+        surface_indices = (self.gaussian_min_surface_distance < torch.finfo(torch.float).max)
+
+        mean_and_std = torch.std_mean(self.gaussian_min_surface_distance[surface_indices])
+
+        return self.gaussian_min_surface_distance < mean_and_std[1] * surface_distance_threshold
+
+    def get_visible_gaussians(self):
         """ 
-        Returns mask of Gaussians that have been rendered 
+        Returns mask of Gaussians that have a large visible contribution to rendered images (according to the visible gaussian threshold)
         """
         return self.get_gaussians_above_contribution_threshold(self.visible_gaussian_threshold)
+    
+    def get_gaussians_with_low_surface_distance(self):
+        """
+        Returns mask of Gaussians that are close to the surface (according to the surface distance standard deviation)
+        """
+        return self.get_surface_gaussians_below_distance_threshold(self.surface_distance_std)
 
-    def get_predicted_surface_gaussians(self):
+    def get_predicted_surface_gaussians(self, predicted_surface_std=0.5):
         """
         Returns mask of Gaussians that are predicted to be on the surface of the scene
         """
-        return self.get_gaussians_above_contribution_threshold(torch.mean(self.get_max_gaussian_contributions()))
+        return self.get_surface_gaussians_below_distance_threshold(predicted_surface_std)
+        #return self.get_gaussians_above_contribution_threshold(torch.mean(self.get_max_gaussian_contributions()))
 
