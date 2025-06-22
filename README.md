@@ -59,12 +59,13 @@ The transform path can either be to a transforms.json file or COLMAP output file
 | **input_path**                  | -              |  Path to ply or splat file to convert to a point cloud |
 | output_path                     | 3dgs_pc.ply    |  Path to output file (must be ply file) |
 | **transform_path**              | -              |  Path to COLMAP or Transform file used for loading in camera positions for rendering colours |
+| mask_path                       | -              |  Path to directory containing associated masks (must have the same image names as in transforms) |
 | renderer_type                   | cuda           |  The type of renderer to use for determining point colours (currently supports 'cuda' or 'python') |
 | **num_points**                  | 10000000       |  Total number of points to generate for the pointcloud |
 | exact_num_points                | False          |  Set if the number of generated points should more closely match the num_points argument (slower) |
 | no_prioritise_visible_gaussians | False          |  Gaussians that contribute most to the scene are given more points- set to turn this off |
 | visibility_threshold            | 0.05           |  Minimum contribution each Gaussian must have to be included in the final point cloud generation (smaller value = less noise) |
-| surface_distance_std            | None           | Cull Gaussians that are a minimum of X standard deviations away from the predicted scene surfaces (smaller value = less noise) |
+| surface_distance_std            | -              | Cull Gaussians that are a minimum of X standard deviations away from the predicted scene surfaces (smaller value = less noise) |
 | clean_pointcloud                | False          |  Set to remove outliers on the point cloud after generation (requires Open3D) |
 | generate_mesh                   | False          |  Set to also generate a mesh based on the created point cloud  |
 | poisson_depth                   | 10             |  The depth used in the poisson surface reconstruction algorithm that is used for meshing (larger value = more quality)  |
