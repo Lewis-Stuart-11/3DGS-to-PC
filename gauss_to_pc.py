@@ -503,7 +503,7 @@ def convert_3dgs_to_pc(input_path, transform_path, mask_path, pointcloud_setting
 
         # Get the predicted surface Gaussians
         if pointcloud_settings.generate_mesh:
-            surface_gaussian_idxs = gaussian_renderer.get_predicted_surface_gaussians()
+            surface_gaussian_idxs = gaussian_renderer.get_predicted_surface_gaussians(predicted_surface_std=1.0)
 
             surface_gaussian_idxs = surface_gaussian_idxs[culled_indices] 
 
@@ -526,7 +526,9 @@ def convert_3dgs_to_pc(input_path, transform_path, mask_path, pointcloud_setting
 
     # Validate covariances matrices to ensure they are positive semidefinite and remove Gaussians that are invalid
     invalid_gaussian_indices = gaussians.validate_covariances()
-    total_gaussian_contributions = total_gaussian_contributions[invalid_gaussian_indices]
+
+    if total_gaussian_contributions is not None:
+        total_gaussian_contributions = total_gaussian_contributions[invalid_gaussian_indices]
 
     # Number of attempts per point number generation
     num_sample_attempts = 5 if not pointcloud_settings.exact_num_points else 100
