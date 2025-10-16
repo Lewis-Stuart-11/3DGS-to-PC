@@ -205,6 +205,7 @@ def create_new_gaussian_points(num_points_to_sample, means, covariances, colours
 
         # If no valid points were generated, then skip to next set of points to generate
         if original_sampled_points is None:
+            i+=1
             print("WARNING: Could not generate points for some Gaussians due to error sampling from multivariate normal distribution")
             continue
 
