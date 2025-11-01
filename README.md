@@ -111,13 +111,12 @@ If you are using the Python renderer, consider using the CUDA renderer instead, 
 # Citation
 
 ```
-@misc{stuart20253dgstopcconvert3dgaussian,
-      title={3DGS-to-PC: Convert a 3D Gaussian Splatting Scene into a Dense Point Cloud or Mesh}, 
-      author={Lewis A G Stuart and Michael P Pound},
-      year={2025},
-      eprint={2501.07478},
-      archivePrefix={arXiv},
-      primaryClass={cs.GR},
-      url={https://arxiv.org/abs/2501.07478}, 
+@InProceedings{A_G_Stuart_2025_ICCV,
+    author    = {A G Stuart, Lewis and Morton, Andrew and Stavness, Ian and Pound, Michael P},
+    title     = {3DGS-to-PC: 3D Gaussian Splatting to Dense Point Clouds},
+    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) Workshops},
+    month     = {October},
+    year      = {2025},
+    pages     = {3730-3739}
 }
 ```
