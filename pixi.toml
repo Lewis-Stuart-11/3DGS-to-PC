@@ -1,0 +1,65 @@
+[workspace]
+authors = ["Emilio Olivastri <emilito.olivastri@gmail.com>"]
+channels = ["conda-forge"]
+name = "3DGS-to-PC"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[activation.env]
+CUDA_HOME = "$PIXI_PROJECT_ROOT/.pixi/envs/default"
+PATH = "$CUDA_HOME/bin:$PATH"
+LD_LIBRARY_PATH = "$CUDA_HOME/lib:$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
+
+[tasks]
+echo-env-vars = "echo CUDA_HOME=$CUDA_HOME"
+
+[tasks.install-rasterizer]
+cmd = "pip install -e ./gaussian-pointcloud-rasterization --no-build-isolation --config-settings editable_mode=compat"
+env = { CUDA_HOME = "$PIXI_PROJECT_ROOT/.pixi/envs/default" }
+
+[system-requirements]
+cuda = "12.6"
+
+[dependencies]
+python = "~=3.9.18"
+pip = ">=25.2,<26"
+open3d = ">=0.19.0,<0.20"
+torchvision = ">=0.22.0,<0.23"
+numpy = ">=2.0.2,<3"
+opencv = ">=4.12.0,<5"
+tqdm = ">=4.67.1,<5"
+matplotlib = ">=3.9.4,<4"
+configargparse = ">=1.7.1,<2"
+imageio = ">=2.37.0,<3"
+pillow = ">=11.3.0,<12"
+plyfile = ">=1.1,<2"
+
+# CUDA Build Tools
+cuda-compiler = "*"
+cuda-version = "12.6.*"
+cuda-cudart-dev = "*"
+cuda-crt = "*"
+libcusparse-dev = "*"
+cuda-driver-dev = "*"
+cuda-nvcc = "*"
+cuda-nvrtc-dev = "*"
+cuda-nvtx = "*"
+cuda-nvtx-dev = "*"
+cuda-nvml-dev = "*"
+cuda-profiler-api = "*"
+
+# CUDA Libraries
+cudnn = "*"
+libcublas-dev = "*"
+libcudss-dev = "*"
+libcufile-dev = "*"
+libcufft-dev = "*"
+libcurand-dev = "*"
+libcusolver-dev = "*"
+cusparselt = "*"
+libnvjitlink = "*"
+ninja = ">=1.13.2,<2"
+compilers = ">=1.10.0,<2"
+cuda = ">=12.6.3,<13"
+cuda-toolkit = ">=12.6.3,<13"
+pytorch-gpu = ">=2.7.1,<3"
